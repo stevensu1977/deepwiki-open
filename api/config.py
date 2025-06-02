@@ -1,50 +1,22 @@
-from adalflow import GoogleGenAIClient, OllamaClient
-from adalflow.components.model_client.openai_client import OpenAIClient
 import os
+from typing import Dict, Any
 
-# Configuration for the isolated API
-configs = {
-    "embedder": {
-        "batch_size": 500,
-        "model_client": OpenAIClient,
-        "model_kwargs": {
-            "model": "text-embedding-3-small",
-            "dimensions": 256,
-            "encoding_format": "float",
-        },
+# Replace adalflow configuration with strands configuration
+configs: Dict[str, Any] = {
+    # Remove adalflow-specific configuration
+    # "embedder_openai": {
+    #     "model_client": OpenAIClient,
+    #     ...
+    # },
+    
+    # Add strands configuration
+    "strands_agent": {
+        "model": "us.amazon.nova-premier-v1:0",
+        "temperature": 0.3,
+        "max_tokens": 4096,
     },
-    "retriever": {
-        "top_k": 20,
-    },
-    "generator": {
-        "model_client": GoogleGenAIClient,
-        "model_kwargs": {
-            "model": "gemini-2.5-flash-preview-04-17",
-            "temperature": 0.7,
-            "top_p": 0.8,
-        },
-    },
-    "embedder_ollama": {
-        "model_client": OllamaClient,
-        "model_kwargs": {
-            "model": "nomic-embed-text"
-        },
-    },
-    "generator_ollama": {
-        "model_client": OllamaClient,
-        "model_kwargs": {
-            "model": "qwen3:1.7b",
-            "options": {
-                "temperature": 0.7,
-                "top_p": 0.8,
-            }
-        },
-    },
-    "text_splitter": {
-        "split_by": "word",
-        "chunk_size": 350,
-        "chunk_overlap": 100,
-    },
+    
+    # Keep file filtering configuration
     "file_filters": {
         "excluded_dirs": [
             "./.venv/", "./venv/", "./env/", "./virtualenv/", 
@@ -67,17 +39,14 @@ configs = {
             "tsconfig.json", "webpack.config.js", "babel.config.js", "rollup.config.js",
             "jest.config.js", "karma.conf.js", "vite.config.js", "next.config.js",
             "*.min.js", "*.min.css", "*.bundle.js", "*.bundle.css",
-            "*.map", "*.gz", "*.zip", "*.tar", "*.tgz", "*.rar",
-            "*.pyc", "*.pyo", "*.pyd", "*.so", "*.dll", "*.class", "*.exe", "*.o", "*.a",
-            "*.jpg", "*.jpeg", "*.png", "*.gif", "*.ico", "*.svg", "*.webp",
-            "*.mp3", "*.mp4", "*.wav", "*.avi", "*.mov", "*.webm",
-            "*.csv", "*.tsv", "*.xls", "*.xlsx", "*.db", "*.sqlite", "*.sqlite3",
-            "*.pdf", "*.docx", "*.pptx",
         ],
     },
-    "repository": {
-        # Maximum repository size in MB
-        "size_limit_mb": 50000,
+    
+    # 保留文本分割配置
+    "text_splitter": {
+        "split_by": "word",
+        "chunk_size": 350,
+        "chunk_overlap": 100,
     },
 }
 

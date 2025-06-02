@@ -1,13 +1,20 @@
-import os
-import logging
-from fastapi import FastAPI, HTTPException, Request
+# Replace adalflow imports with strands, remove genai and openai
+from fastapi import FastAPI, HTTPException, Request, Depends, Response
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import Response
-from typing import List, Optional, Dict, Any, Literal
+import logging
+import os
 import json
 from datetime import datetime
+from typing import Dict, Any, List, Optional, Literal
 from pydantic import BaseModel, Field
-import google.generativeai as genai
+
+# Replace adalflow imports with strands, remove genai and openai
+import strands
+from strands import Agent
+from strands_tools import http_request, retrieve, memory
+
+# Import local modules
+from .rag import RAG, RAGAnswer
 
 # Configure logging
 logging.basicConfig(
@@ -19,11 +26,11 @@ logger = logging.getLogger(__name__)
 # Get API keys from environment variables
 google_api_key = os.environ.get('GOOGLE_API_KEY')
 
-# Configure Google Generative AI
-if google_api_key:
-    genai.configure(api_key=google_api_key)
-else:
-    logger.warning("GOOGLE_API_KEY not found in environment variables")
+# Remove genai configuration
+# if google_api_key:
+#     genai.configure(api_key=google_api_key)
+# else:
+#     logger.warning("GOOGLE_API_KEY not found in environment variables")
 
 # Initialize FastAPI app
 app = FastAPI(
@@ -189,6 +196,37 @@ from api.simple_chat import chat_completions_stream
 # Add the chat_completions_stream endpoint to the main app
 app.add_api_route("/chat/completions/stream", chat_completions_stream, methods=["POST"])
 
+# Update RAG instantiation and API endpoint
+rag = RAG()
+
+@app.post("/api/chat")
+async def chat(request: Request):
+    """
+    Chat API endpoint using Strands Agent.
+    """
+    try:
+        data = await request.json()
+        query = data.get("query", "")
+        repo_url = data.get("repo_url", "")
+        
+        if not query:
+            raise HTTPException(status_code=400, detail="Query is required")
+        
+        # If repo_url is provided, prepare the retriever
+        if repo_url and repo_url != rag.repo_url_or_path:
+            rag.prepare_retriever(repo_url)
+        
+        # Process the query
+        response, _ = rag.call(query)
+        
+        return {
+            "answer": response.answer,
+            "rationale": response.rationale
+        }
+    except Exception as e:
+        logging.error(f"Error in chat endpoint: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
+
 @app.get("/")
 async def root():
     """Root endpoint to check if the API is running"""
@@ -198,6 +236,7 @@ async def root():
         "endpoints": {
             "Chat": [
                 "POST /chat/completions/stream - Streaming chat completion",
+                "POST /api/chat - Chat API endpoint using Strands Agent"
             ],
             "Wiki": [
                 "POST /export/wiki - Export wiki content as Markdown or JSON",

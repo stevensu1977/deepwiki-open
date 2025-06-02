@@ -1,8 +1,15 @@
 import uvicorn
 import os
-import sys
 import logging
+import sys
 from dotenv import load_dotenv
+
+# Replace adalflow imports with strands
+import strands
+from strands import Agent
+
+# Import local modules
+from .api import app
 
 # Load environment variables from .env file
 load_dotenv()
