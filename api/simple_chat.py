@@ -1,5 +1,7 @@
 import os
 import logging
+import json
+import hashlib
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
@@ -10,7 +12,7 @@ from pydantic import BaseModel, Field
 import strands
 from strands import Agent
 from strands.models import BedrockModel
-from strands_tools import http_request, retrieve, memory
+from strands_tools import http_request, retrieve, mem0_memory
 
 from api.data_pipeline import count_tokens, get_file_content
 from api.rag import RAG
@@ -22,6 +24,9 @@ logging.basicConfig(
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
 )
 logger = logging.getLogger(__name__)
+
+# Check if debug mode is enabled
+DEBUG_MODE = os.environ.get("DEEPWIKI_DEBUG", "0") == "1"
 
 # Get API keys from environment variables
 google_api_key = os.environ.get('GOOGLE_API_KEY')
@@ -62,6 +67,10 @@ class ChatCompletionRequest(BaseModel):
 async def chat_completions_stream(request: ChatCompletionRequest):
     """Stream a chat completion response using Strands Agent"""
     try:
+        # Log the request in debug mode
+        if DEBUG_MODE:
+            logger.debug(f"Chat completion request: {json.dumps(request.dict(), indent=2)}")
+        
         # Check if request contains very large input
         input_too_large = False
         if request.messages and len(request.messages) > 0:
@@ -79,8 +88,12 @@ async def chat_completions_stream(request: ChatCompletionRequest):
             last_message = request.messages[-1]
             if hasattr(last_message, 'content'):
                 query = last_message.content
+                
+        # Log the query in debug mode
+        if DEBUG_MODE:
+            logger.debug(f"User query: {query}")
 
-        # 创建模型实例
+        # Create model instance
         bedrock_model = BedrockModel(
             model_id=configs["strands_agent"]["model"],
             temperature=configs["strands_agent"]["temperature"],
@@ -88,20 +101,57 @@ async def chat_completions_stream(request: ChatCompletionRequest):
             top_p=0.8
         )
 
-        # 使用模型实例初始化Agent
+        # Initialize Agent with model instance
         agent = Agent(
             model=bedrock_model,
-            tools=[http_request, retrieve, memory]
+            tools=[http_request, retrieve, mem0_memory]
         )
 
         # Create a streaming response
         async def generate():
             try:
-                # Format the prompt
-                prompt = f"User: {query}\n\nAssistant: "
+                # Generate a unique user ID based on repo URL (or use an existing one)
+                user_id = hashlib.md5(request.repo_url.encode()).hexdigest()
+                
+                # Store the current query in memory
+                agent.tool.mem0_memory(
+                    action="store",
+                    content=f"User query: {query}",
+                    user_id=user_id
+                )
+                
+                # Retrieve previous context if available
+                memory_response = agent.tool.mem0_memory(
+                    action="retrieve",
+                    user_id=user_id
+                )
+                
+                # Extract previous context
+                previous_context = memory_response.get("content", "")
+                
+                # Format the prompt with context if available
+                if previous_context:
+                    prompt = f"Previous context:\n{previous_context}\n\nUser: {query}\n\nAssistant: "
+                else:
+                    prompt = f"User: {query}\n\nAssistant: "
+                
+                # Log the prompt in debug mode
+                if DEBUG_MODE:
+                    logger.debug(f"Prompt sent to model: {prompt}")
                 
                 # Call the Strands Agent
                 response = agent(prompt)
+                
+                # Store the response in memory
+                agent.tool.mem0_memory(
+                    action="store",
+                    content=f"Assistant response: {response}",
+                    user_id=user_id
+                )
+                
+                # Log the response in debug mode
+                if DEBUG_MODE:
+                    logger.debug(f"Model response: {response}")
                 
                 # Stream the response
                 yield str(response)

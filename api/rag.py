@@ -1,3 +1,4 @@
+import traceback
 from typing import Any, List, Tuple, Dict
 from uuid import uuid4
 import logging
@@ -6,8 +7,12 @@ import re
 import strands
 from strands import Agent
 from strands.models import BedrockModel
-from strands_tools import http_request, retrieve, memory
+from strands_tools import http_request, retrieve, mem0_memory
 from dataclasses import dataclass, field
+import threading
+
+# 创建一个全局锁，用于同步 Agent 调用
+agent_lock = threading.RLock()
 
 # Create our own implementation of the conversation classes
 @dataclass
@@ -131,7 +136,7 @@ class RAG:
         self.local_ollama = local_ollama
         self.repo_url_or_path = None
         
-        # 创建模型实例
+        # Create model instance
         bedrock_model = BedrockModel(
             model_id=configs["strands_agent"]["model"],
             temperature=configs["strands_agent"]["temperature"],
@@ -139,10 +144,10 @@ class RAG:
             top_p=0.8
         )
         
-        # 使用模型实例初始化Agent
+        # Initialize Agent with model instance
         self.agent = Agent(
             model=bedrock_model,
-            tools=[http_request, retrieve, memory]
+            tools=[http_request, retrieve, mem0_memory]
         )
         
         # Initialize conversation ID for memory tracking
@@ -154,112 +159,145 @@ class RAG:
 
     def initialize_db_manager(self):
         """Initialize the database manager with local storage"""
-        # 不再使用DatabaseManager，而是使用Strands的内置存储
+        # No longer using DatabaseManager, using Strands built-in storage instead
         self.transformed_docs = []
 
     def prepare_retriever(self, repo_url_or_path: str, access_token: str = None, local_ollama: bool = False):
         """
-        Prepare the retriever for a repository using Strands retrieve tool.
+        Prepare the retriever for a repository using local git clone.
 
         Args:
             repo_url_or_path: URL or local path to the repository
             access_token: Optional access token for private repositories
             local_ollama: Optional flag to use local Ollama for embedding
         """
+        from api.data_pipeline import clone_repository, get_repo_file_tree, extract_repo_info, get_current_commit_sha
+        from api.database import get_repository, save_repository
+        
         self.repo_url_or_path = repo_url_or_path
         
-        # Store repository information for the agent to use
-        logger.info(f"Repository set to: {repo_url_or_path}")
+        # Extract owner and name from repo URL
+        owner, name = extract_repo_info(repo_url_or_path)
         
-        # Store repository information in memory for context
+        # Check if repository exists in database
+        repo = get_repository(owner, name)
+        
+        # Clone repository locally
         try:
-            self.agent.tool.memory(
+            repo_path = clone_repository(repo_url_or_path, access_token)
+            logger.info(f"Repository cloned to: {repo_path}")
+            
+            # Get current commit SHA
+            commit_sha = get_current_commit_sha(repo_path)
+            
+            # Save or update repository in database
+            if not repo:
+                repo_id = save_repository(owner, name, repo_url_or_path, commit_sha)
+                logger.info(f"Saved repository {owner}/{name} to database with ID {repo_id}")
+            else:
+                # Only update if commit SHA has changed
+                if repo["commit_sha"] != commit_sha:
+                    repo_id = save_repository(owner, name, repo_url_or_path, commit_sha)
+                    logger.info(f"Updated repository {owner}/{name} in database with new commit SHA")
+                else:
+                    repo_id = repo["id"]
+                    logger.info(f"Repository {owner}/{name} is already up to date in database")
+            
+            # Get repository file tree
+            file_tree = get_repo_file_tree(repo_path)
+            
+            # Store repository information in memory
+            self.agent.tool.mem0_memory(
                 action="store",
-                document=f"Repository URL: {repo_url_or_path}",
+                document=f"Repository URL: {repo_url_or_path}\nRepository Path: {repo_path}\n\nFile Tree:\n{file_tree}",
                 document_id="repo_info",
                 metadata={"conversation_id": self.conversation_id}
             )
             logger.info("Stored repository information in memory")
+            
+            # Return repository path for future use
+            return repo_path
+            
         except Exception as e:
-            logger.error(f"Failed to store repository info in memory: {str(e)}")
-        
-        # With Strands, we don't need to explicitly load the repository
-        # as the retrieve tool will handle this dynamically
-        return []
+            logger.error(f"Failed to prepare repository: {str(e)}")
+            
+            # Store error information in memory
+            self.agent.tool.mem0_memory(
+                action="store",
+                content=f"Error preparing repository: {str(e)}",
+                user_id=self.conversation_id
+            )
+            
+            # Return empty list to indicate failure
+            return []
 
     def call(self, query: str) -> Tuple[Any, List]:
         """
-        Process a query using RAG with Strands Agent.
+        Process a query using RAG with local repository access.
 
         Args:
             query: The user's query
-
+        
         Returns:
-            Tuple of (RAGAnswer, retrieved_documents)
+            Tuple of (response, context)
         """
+        from api.data_pipeline import get_file_content
+        
         try:
-            # Retrieve conversation history using Strands memory tool
-            try:
-                # Use the memory tool to retrieve conversation history
-                history_result = self.agent.tool.memory(
+            # 使用线程锁来确保同一时间只有一个线程调用 Agent
+            # 这不是最高效的方法，但可以防止阻塞问题
+            with agent_lock:
+                # Check for repository information
+                repo_info_response = self.agent.tool.mem0_memory(
                     action="retrieve",
-                    query=f"conversation:{self.conversation_id}"
+                    user_id=self.conversation_id
                 )
-                conversation_history = history_result if history_result else ""
-                logger.info(f"Retrieved conversation history: {len(str(conversation_history))} characters")
-            except Exception as e:
-                logger.warning(f"Could not retrieve conversation history: {str(e)}")
-                conversation_history = ""
+                
+                # Extract repository path from memory content
+                repo_path = None
+                repo_info = repo_info_response.get("content", "")
+                print(f"Repo info: {repo_info}")
+                if repo_info:
+                    match = re.search(r"Repository Path: (.+?)(?:\n|$)", repo_info)
+                    if match:
+                        repo_path = match.group(1)
+                
+                # Build prompt
+                prompt = f"""
+                You are a helpful AI assistant with access to a git repository.
+                
+                User Query: {query}
+                
+                Please provide a detailed and accurate response based on the repository content.
+                If you need to reference specific files, you can use the file_read function.
+                """
+                
+                # Call Agent for response
+                response = self.agent(prompt)
+                
+                # Convert response to string if it's not already
+                response_str = str(response)
+                
+                # Check for file read requests in the response
+                file_read_requests = re.findall(r"file_read\((.+?)\)", response_str)
+                context = []
+                
+                # Process file read requests
+                for file_path in file_read_requests:
+                    # Clean file path
+                    file_path = file_path.strip().strip('"\'')
+                    
+                    # If repository path exists, read file content
+                    if repo_path:
+                        content = get_file_content(repo_path, file_path)
+                        context.append({
+                            "file": file_path,
+                            "content": content
+                        })
+                
+                return response_str, context
             
-            # Create prompt with context about the repository
-            prompt = f"""
-            I need you to answer a question about the code repository: {self.repo_url_or_path}
-            
-            Previous conversation:
-            {conversation_history}
-            
-            User question: {query}
-            
-            Please provide a detailed answer with code examples where appropriate.
-            """
-            
-            # Call the Strands Agent
-            response = self.agent(prompt)
-            
-            # Create RAGAnswer object
-            final_response = RAGAnswer(
-                rationale="Generated using Strands Agent",
-                answer=str(response)
-            )
-            
-            # Post-process answer to remove markdown fences if present
-            if hasattr(final_response, 'answer') and isinstance(final_response.answer, str):
-                final_response.answer = re.sub(r'^```markdown\s*\n', '', final_response.answer)
-                final_response.answer = re.sub(r'^```\w*\s*\n', '', final_response.answer)
-                final_response.answer = re.sub(r'\n```$', '', final_response.answer)
-
-            # Store the conversation turn in memory
-            try:
-                conversation_turn = f"User: {query}\nAssistant: {final_response.answer}"
-                self.agent.tool.memory(
-                    action="store",
-                    document=conversation_turn,
-                    document_id=f"turn_{uuid4()}",
-                    metadata={"conversation_id": self.conversation_id}
-                )
-                logger.info("Stored conversation turn in memory")
-            except Exception as e:
-                logger.error(f"Failed to store conversation in memory: {str(e)}")
-            
-            # For now, return empty list as retrieved_documents since we're using Strands
-            return final_response, []
-
         except Exception as e:
+            traceback.print_exc()
             logger.error(f"Error in RAG call: {str(e)}")
-
-            # Create error response
-            error_response = RAGAnswer(
-                rationale="Error occurred while processing the query.",
-                answer=f"I apologize, but I encountered an error while processing your question. Please try again or rephrase your question."
-            )
-            return error_response, []
+            return f"Error processing query: {str(e)}", []
