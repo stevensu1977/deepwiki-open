@@ -11,7 +11,7 @@ configs: Dict[str, Any] = {
     
     # Add strands configuration
     "strands_agent": {
-        "model": "us.amazon.nova-premier-v1:0",
+        "model": "us.anthropic.claude-3-5-haiku-20241022-v1:0",
         "temperature": 0.3,
         "max_tokens": 4096,
     },

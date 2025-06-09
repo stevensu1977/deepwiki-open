@@ -13,7 +13,7 @@ import asyncio
 import threading
 from concurrent.futures import ThreadPoolExecutor
 
-from api.simple_chat import chat_completions_stream
+from api.simple_chat import chat_completions_stream, chat_completions_stream_v2
 
 # Import database module
 from api.database import (
@@ -153,6 +153,7 @@ class DocumentationDetailResponse(BaseModel):
 
 # Add the chat_completions_stream endpoint to the main app
 app.add_api_route("/chat/completions/stream", chat_completions_stream, methods=["POST"])
+app.add_api_route("/chat/completions/stream/v2", chat_completions_stream_v2, methods=["POST"])
 
 # Create RAG instance
 rag = RAG()

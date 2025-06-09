@@ -627,28 +627,31 @@ Remember that this plan will guide the content generation for the entire documen
             "content_generation": """
 Based on the planning stage XML structure, please generate comprehensive content for each chapter and section.
 
-IMPORTANT: Your response will be directly saved as Markdown content. DO NOT include any introductory text like "I'll generate..." or XML tags in your response. 
+IMPORTANT INSTRUCTIONS:
+1. DO NOT ask if content was previously generated or stored.
+2. DO NOT ask for clarification on what to do.
+3. ALWAYS generate fresh content directly, regardless of any previous interactions.
+4. Your output will be directly saved as Markdown content.
+5. DO NOT include any introductory text, questions, or XML tags.
 
 Your output should be PURE MARKDOWN CONTENT ONLY, starting directly with the chapter heading (# Chapter Title).
 
-For example, instead of:
+INCORRECT OUTPUT EXAMPLE (DO NOT DO THIS):
 ```
-I'll generate comprehensive documentation content based on the XML planning structure...
-
-<documentation_content>
-  <chapter id="chapter-1">
-    <content>
-# Architecture Overview
-...content...
-    </content>
-  </chapter>
-</documentation_content>
+I noticed that the documentation content was already generated in a previous interaction. Would you like me to:
+1. Retrieve the previously generated documentation content
+2. Regenerate the documentation content
+3. Perform a different task with the repository information
 ```
 
-JUST WRITE:
+CORRECT OUTPUT EXAMPLE (DO THIS):
 ```
 # Architecture Overview
-...content...
+DeepWiki-Open is a comprehensive documentation generation system built with a modern tech stack. This chapter explores the core architecture...
+
+## System Components
+The system consists of three main components:
+...
 ```
 
 Your documentation MUST include for each chapter/section:
@@ -667,34 +670,97 @@ Your documentation MUST include for each chapter/section:
 - Focus on the most important/illustrative parts of the code
 
 ### Mermaid Diagrams:
-1. MANDATORY: Include AT LEAST ONE relevant Mermaid diagram per chapter
-2. CRITICAL: All diagrams MUST follow strict vertical orientation:
-   - Use "graph TD" (top-down) directive for flow diagrams
-   - NEVER use "graph LR" (left-right)
-   - Maximum node width should be 3-4 words
+1. MANDATORY: Include AT LEAST TWO different types of Mermaid diagrams per chapter:
+   - One detailed sequence diagram showing component interactions
+   - One flow diagram showing the process or architecture
 
-3. Flow Diagram Requirements:
-   - Use descriptive node IDs (e.g., UserAuth, DataProcess)
-   - ALL connections MUST use double dashes with arrows (-->)
-   - Add clear labels to connections when necessary: A -->|triggers| B
-   - Use appropriate node shapes based on type:
+2. SEQUENCE DIAGRAM REQUIREMENTS:
+   - Use "sequenceDiagram" directive
+   - Include 4-6 participants with specific file names in quotes (e.g., "User Browser", "Next.js Frontend (src/app/page.tsx)")
+   - Show detailed message exchanges with proper arrow types:
+     - ->> for requests/calls
+     - -->> for responses
+     - -x for errors/failures
+   - Include activations with +/- notation
+   - Add detailed labels to messages (e.g., "POST /chat/completions/stream")
+   - Include notes for clarification
+   - Show complete process flows with 8-12 message exchanges
+   - Example:
+     ```
+     sequenceDiagram
+         participant User as "User Browser"
+         participant Frontend as "Next.js Frontend (src/app/page.tsx)"
+         participant Backend as "FastAPI Backend (api/api.py)"
+         participant Pipeline as "Data Pipeline (api/data_pipeline.py)"
+         participant External as "External APIs (GitHub/OpenAI)"
+         
+         User->>+Frontend: Click "Generate Wiki"
+         Frontend->>+Backend: POST /chat/completions/stream
+         Backend->>+Pipeline: read_all_documents()
+         Pipeline->>+External: Clone repository
+         External-->>-Pipeline: Repository files
+         Pipeline->>Pipeline: Process documents
+         Pipeline->>External: Create embeddings
+         External-->>Pipeline: Vector embeddings
+         Pipeline-->>-Backend: Streaming response chunks
+         Backend-->>-Frontend: Server-sent events
+         Frontend-->>User: Real-time progress updates
+         Frontend->>Frontend: Parse XML structure
+         Frontend->>Frontend: Render wiki pages
+         Frontend-->>-User: Complete generated wiki
+     ```
+
+3. FLOW DIAGRAM REQUIREMENTS:
+   - Use "graph TD" (top-down) directive
+   - Create detailed component diagrams with 10-15 nodes
+   - Use descriptive node IDs
+   - Include file paths in node labels when applicable
+   - Use appropriate node shapes:
      - Rectangle [Text] for components/modules
      - Stadium ([Text]) for inputs/starting points
      - Circle((Text)) for junction points
      - Rhombus{Text} for decision points
+   - Group related components using subgraphs when appropriate
+   - Add detailed labels to connections
+   - Use styling to differentiate node types
+   - Example:
+     ```
+     graph TD
+         subgraph "Frontend Components"
+         A[User Input] --> B["Ask Component UI"]
+         B --> C["Question Input Field<br/>Natural language queries"]
+         C --> D["Submit Question<br/>Trigger API call"]
+         end
+         
+         subgraph "Backend Processing"
+         E["POST /chat/completions/stream<br/>Question context"] --> F["RAG context retrieval<br/>Relevant code sections"]
+         F --> G["Strands agent framework<br/>Google Gemini API"]
+         G --> H["Streaming response<br/>Real-time answers"]
+         end
+         
+         D --> E
+         H --> I["Response Display<br/>Streaming answers"]
+         
+         style A fill:#f9f9f9,stroke:#666
+         style B fill:#e6f7ff,stroke:#0099cc
+         style E fill:#fff7e6,stroke:#ff9900
+         style G fill:#f9f2f4,stroke:#c7254e
+     ```
 
-4. Sequence Diagram Requirements:
-   - Start with "sequenceDiagram" directive on its own line
-   - Define ALL participants at the beginning
-   - Use descriptive but concise participant names
-   - Use the correct arrow types:
-     - ->> for request/asynchronous messages
-     - -->> for response messages
-     - -x for failed messages
-   - Include activation boxes using +/- notation
-   - Add notes for clarification using "Note over" or "Note right of"
+4. ADDITIONAL DIAGRAM TYPES (use at least one when appropriate):
+   - Class diagrams for showing code structure
+   - State diagrams for complex workflows
+   - Entity-relationship diagrams for data models
+   - Component diagrams for system architecture
 
-Focus on creating accurate, clear, and helpful content that follows the structure defined in the planning stage.
+5. DIAGRAM STYLING:
+   - Use consistent styling across diagrams
+   - Add colors to differentiate node types
+   - Keep node text concise but descriptive (2-3 lines max)
+   - Include both component names and file paths when relevant
+   - Use subgraphs to group related components
+
+REMEMBER: ALWAYS generate fresh content directly. NEVER ask if content was previously generated or stored. Focus on creating accurate, clear, and visually informative documentation with professional-quality diagrams.
 """,
             "optimization": """
 Please optimize the generated documentation to improve its quality, consistency, and usability.
