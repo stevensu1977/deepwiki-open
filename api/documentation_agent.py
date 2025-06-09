@@ -291,6 +291,7 @@ class DocumentationAgent:
             user_prompt = self._create_user_prompt(repo_url, stage, previous_results, file_tree, readme)
         else:
             user_prompt = self._create_user_prompt(repo_url, stage, previous_results, None, readme)
+            
         
         # Call the agent with thread lock to prevent concurrent calls
         try:
@@ -562,25 +563,99 @@ Please perform a detailed **code analysis** of the provided repository, focusing
 6.  **Dependencies & External Integrations:** Identify and explain any external services, APIs, or third-party dependencies the project relies on.
 7.  **Documentation Prioritization:** Based on your analysis, suggest the **most important parts of the codebase that absolutely require detailed documentation**. This will guide the planning stage.""",
             "planning": """
-Based on the code analysis, please create a detailed plan for the documentation, including structure, chapters, and diagrams.
+Based on the code analysis, please create a comprehensive and detailed documentation plan in XML format.
 
-Your plan should include:
-1. A proposed table of contents with main sections and subsections
-2. Key topics to cover in each section
-3. Suggestions for diagrams or visualizations that would be helpful
-4. A list of code examples that should be included
-5. A prioritization of documentation sections (which are most important)
+IMPORTANT: Your documentation plan should be thorough and cover all major aspects of the repository. Use the following structure as inspiration, but adapt and expand it based on the specific repository you're analyzing:
 
-The documentation should be comprehensive but focused on what developers need to understand and use the codebase effectively.
+RECOMMENDED DOCUMENTATION STRUCTURE:
+- Overview (project introduction, purpose, key features)
+- System Architecture (high-level design, component relationships)
+  - Frontend Architecture (UI framework, state management, routing)
+  - Backend Architecture (API design, data flow, server components)
+  - Data Processing Pipeline (data handling, transformations, storage)
+- Core Features (detailed explanation of main functionalities)
+  - Feature 1 (e.g., Wiki Generation, Document Analysis)
+  - Feature 2 (e.g., Interactive Q&A, Search)
+  - Feature 3 (e.g., Visualization, Export)
+- Technical Implementation
+  - Key Algorithms and Processes
+  - Integration Points
+  - Performance Considerations
+- API Reference (endpoints, parameters, responses)
+- Configuration & Setup (installation, environment setup)
+- Development Guide (contribution guidelines, testing)
+- Advanced Usage (customization, extensions)
+
+Your output MUST follow this exact XML structure:
+<documentation_plan>
+  <title>Descriptive title for the documentation</title>
+  <description>Comprehensive overview of the repository</description>
+  <chapters>
+    <chapter id="chapter-1">
+      <title>Chapter title</title>
+      <description>Detailed description of what this chapter will cover</description>
+      <importance>high|medium|low</importance>
+      <sections>
+        <section id="section-1.1">
+          <title>Section title</title>
+          <description>Detailed description of this section</description>
+          <source_files>
+            <file>path/to/relevant/file1.ext</file>
+            <file>path/to/relevant/file2.ext</file>
+          </source_files>
+        </section>
+        <!-- More sections as needed -->
+      </sections>
+    </chapter>
+    <!-- More chapters as needed -->
+  </chapters>
+</documentation_plan>
+
+Guidelines for creating an exceptional documentation plan:
+
+1. DEPTH: Create 6-8 main chapters covering different aspects of the repository
+2. BREADTH: Each chapter should have 3-5 detailed sections
+3. RELEVANCE: Each section must list the most relevant source files (3-5 files per section)
+4. COMPLETENESS: Ensure all major components and features are documented
+5. PRIORITIZATION: Assign appropriate importance levels (high/medium/low) to guide content generation
+6. TECHNICAL ACCURACY: Ensure chapter and section titles accurately reflect the repository's components
+7. USER PERSPECTIVE: Consider what information would be most valuable to users and developers
+8. LOGICAL FLOW: Organize chapters and sections in a logical progression from overview to detailed implementation
+
+Remember that this plan will guide the content generation for the entire documentation, so it needs to be comprehensive, well-structured, and technically accurate.
 """,
             "content_generation": """
-Based on the plan, please generate the content for the documentation.
+Based on the planning stage XML structure, please generate comprehensive content for each chapter and section.
 
-Your documentation MUST include:
+IMPORTANT: Your response will be directly saved as Markdown content. DO NOT include any introductory text like "I'll generate..." or XML tags in your response. 
+
+Your output should be PURE MARKDOWN CONTENT ONLY, starting directly with the chapter heading (# Chapter Title).
+
+For example, instead of:
+```
+I'll generate comprehensive documentation content based on the XML planning structure...
+
+<documentation_content>
+  <chapter id="chapter-1">
+    <content>
+# Architecture Overview
+...content...
+    </content>
+  </chapter>
+</documentation_content>
+```
+
+JUST WRITE:
+```
+# Architecture Overview
+...content...
+```
+
+Your documentation MUST include for each chapter/section:
 1. Clear introduction explaining what this component/feature is
 2. Detailed explanation of purpose and functionality
 3. Code snippets when helpful (less than 20 lines each)
-4. At least one Mermaid diagram (flow or sequence)
+4. At least one Mermaid diagram per chapter (flow or sequence)
 5. Proper markdown formatting with code blocks and headings
 6. Source links to relevant files
 7. Explicit explanation of how this component/feature integrates with the overall architecture
@@ -592,7 +667,7 @@ Your documentation MUST include:
 - Focus on the most important/illustrative parts of the code
 
 ### Mermaid Diagrams:
-1. MANDATORY: Include AT LEAST ONE relevant Mermaid diagram, preferably a sequence diagram if applicable
+1. MANDATORY: Include AT LEAST ONE relevant Mermaid diagram per chapter
 2. CRITICAL: All diagrams MUST follow strict vertical orientation:
    - Use "graph TD" (top-down) directive for flow diagrams
    - NEVER use "graph LR" (left-right)
@@ -619,11 +694,7 @@ Your documentation MUST include:
    - Include activation boxes using +/- notation
    - Add notes for clarification using "Note over" or "Note right of"
 
-### Source Links:
-For each major component discussed, include source links in this format:
-<p>Sources: <a href="https://github.com/[owner]/[repo]/blob/main/[path]" target="_blank" rel="noopener noreferrer" class="mb-1 mr-1 inline-flex items-stretch font-mono text-xs !no-underline">[filename]</a></p>
-
-Focus on creating accurate, clear, and helpful content that will help developers understand and use the codebase.
+Focus on creating accurate, clear, and helpful content that follows the structure defined in the planning stage.
 """,
             "optimization": """
 Please optimize the generated documentation to improve its quality, consistency, and usability.
@@ -657,98 +728,30 @@ Provide a summary of your quality check and any final improvements that should b
     
     async def generate_documentation(self, repo_url: str, title: str, request_id: str, access_token: str = None) -> str:
         """
-        Generate documentation for a repository
+        生成文档
         
         Args:
-            repo_url: Repository URL
-            title: Documentation title
-            request_id: Request ID
-            access_token: Optional GitHub access token
+            repo_url: 仓库URL
+            title: 文档标题
+            request_id: 请求ID
+            access_token: 访问令牌（可选）
         
         Returns:
-            Path to the generated documentation
+            输出文件路径
         """
-        logger.info(f"Generating documentation for {repo_url} with title {title}")
-        
-        # 从数据库获取任务状态
-        task_info = get_documentation_task(request_id)
-        
-        # 如果任务不存在，创建新任务
-        if not task_info:
-            logger.error(f"Job {request_id} not found in database")
-            # 创建默认阶段列表
-            stages = [
-                {
-                    "name": "code_analysis",
-                    "description": "Analyzing repository structure and code",
-                    "completed": False,
-                    "execution_time": None
-                },
-                {
-                    "name": "planning",
-                    "description": "Planning documentation structure",
-                    "completed": False,
-                    "execution_time": None
-                },
-                {
-                    "name": "content_generation",
-                    "description": "Generating documentation content",
-                    "completed": False,
-                    "execution_time": None
-                },
-                {
-                    "name": "optimization",
-                    "description": "Optimizing and refining content",
-                    "completed": False,
-                    "execution_time": None
-                },
-                {
-                    "name": "quality_check",
-                    "description": "Performing quality checks",
-                    "completed": False,
-                    "execution_time": None
-                }
-            ]
-            
-            # 保存任务到数据库
-            save_documentation_task(
-                task_id=request_id,
-                repo_url=repo_url,
-                title=title,
-                status="pending",
-                progress=0,
-                created_at=datetime.now().isoformat(),
-                task_data={"message": f"Documentation generation for '{title}' has been started"}
-            )
-            
-            # 保存阶段到数据库
-            for stage in stages:
-                save_documentation_stage(
-                    task_id=request_id,
-                    name=stage["name"],
-                    description=stage["description"],
-                    completed=False
-                )
-            
-            logger.info(f"Created new task in database for {request_id}")
-        
-        # 更新任务状态为运行中
-        save_documentation_task(
-            task_id=request_id,
-            repo_url=repo_url,
-            title=title,
-            status="running",
-            progress=10,
-            current_stage="fetching_repository"
-        )
+        logger.info(f"Starting documentation generation for {repo_url} with title '{title}'")
         
         # 创建输出目录
         output_dir = os.path.join("output", "documentation")
         os.makedirs(output_dir, exist_ok=True)
         
-        # 创建安全的文件名
+        # 为当前文档创建专门的目录
         safe_title = "".join(c if c.isalnum() else "_" for c in title)
-        output_path = os.path.join(output_dir, f"{safe_title}_{request_id}.md")
+        doc_dir = os.path.join(output_dir, f"{safe_title}_{request_id}")
+        os.makedirs(doc_dir, exist_ok=True)
+        
+        # 主输出文件路径
+        main_output_path = os.path.join(doc_dir, "index.md")
         
         # 初始化结果字典
         results = {}
@@ -756,7 +759,7 @@ Provide a summary of your quality check and any final improvements that should b
         try:
             # 获取仓库结构
             file_tree, readme = await self.fetch_repository_structure(repo_url, access_token)
-            logger.info(f"Successfully fetched repository structure with {len(file_tree.split('\n'))} files")
+            logger.info(f"Successfully fetched repository structure with {len(file_tree.split('\\n'))} files")
             
             # 更新任务状态为第一个文档生成阶段
             save_documentation_task(
@@ -768,17 +771,16 @@ Provide a summary of your quality check and any final improvements that should b
                 current_stage=self.stages[0]
             )
             
-            # 处理每个阶段
-            total_stages = len(self.stages)
-            
-            for i, stage in enumerate(self.stages):
+            # 处理前两个阶段：代码分析和规划
+            initial_stages = ["code_analysis", "planning"]
+            for stage in initial_stages:
                 # 更新任务状态
                 save_documentation_task(
                     task_id=request_id,
                     repo_url=repo_url,
                     title=title,
                     status="running",
-                    progress=int(20 + ((i) / total_stages) * 80),
+                    progress=20 + (initial_stages.index(stage) * 10),  # 20% 到 30%
                     current_stage=stage
                 )
                 
@@ -817,35 +819,350 @@ Provide a summary of your quality check and any final improvements that should b
                         completed=False,
                         error=str(e)
                     )
+        except Exception as e:
+            logger.error(f"Error generating documentation: {str(e)}")
+            raise
+        # 处理规划结果，生成章节文件
+        if "planning" in results:
+            planning_result = results["planning"].content
+            logger.info(f"Processing planning result for task {request_id}")
             
-            # 编译最终文档，即使某些阶段失败
+            # 尝试提取和解析XML
+            try:
+                # 提取XML部分
+                xml_start = planning_result.find("<documentation_plan>")
+                xml_end = planning_result.find("</documentation_plan>")
+                
+                if xml_start >= 0 and xml_end > xml_start:
+                    xml_content = planning_result[xml_start:xml_end + len("</documentation_plan>")]
+                    logger.info(f"Found XML content: {len(xml_content)} characters")
+                    
+                    # 保存原始XML到index.xml文件
+                    xml_path = os.path.join(doc_dir, "index.xml")
+                    with open(xml_path, "w", encoding="utf-8") as f:
+                        f.write(xml_content)
+                    logger.info(f"Saved XML content to {xml_path}")
+                    
+                    # 清理和修复XML内容
+                    try:
+                        # 替换常见的特殊字符
+                        xml_content = xml_content.replace("&", "&amp;")
+                        # 确保不会替换已经转义的实体
+                        xml_content = xml_content.replace("&amp;amp;", "&amp;")
+                        xml_content = xml_content.replace("&amp;lt;", "&lt;")
+                        xml_content = xml_content.replace("&amp;gt;", "&gt;")
+                        
+                        # 处理可能的CDATA部分
+                        xml_content = re.sub(r'<!\[CDATA\[(.*?)\]\]>', lambda m: m.group(1).replace('<', '&lt;').replace('>', '&gt;'), xml_content, flags=re.DOTALL)
+                        
+                        # 记录清理后的XML
+                        logger.info(f"Cleaned XML content for parsing")
+                        
+                        # 保存清理后的XML用于调试
+                        clean_xml_path = os.path.join(doc_dir, "index_cleaned.xml")
+                        with open(clean_xml_path, "w", encoding="utf-8") as f:
+                            f.write(xml_content)
+                    except Exception as clean_error:
+                        logger.error(f"Error cleaning XML: {str(clean_error)}")
+                    
+                    try:
+                        # 解析XML
+                        import xml.etree.ElementTree as ET
+                        from io import StringIO
+                        
+                        # 使用StringIO和ElementTree解析XML
+                        xml_io = StringIO(xml_content)
+                        tree = ET.parse(xml_io)
+                        root = tree.getroot()
+                        
+                        logger.info(f"Successfully parsed XML with ElementTree")
+                    except ET.ParseError as parse_error:
+                        logger.error(f"ElementTree parse error: {str(parse_error)}")
+                        
+                        # 尝试使用lxml进行更宽松的解析
+                        try:
+                            import lxml.etree as LET
+                            
+                            # 使用lxml的解析器，它更宽松
+                            parser = LET.XMLParser(recover=True)
+                            root = LET.fromstring(xml_content.encode('utf-8'), parser)
+                            
+                            # 转换为ElementTree元素
+                            root = ET.fromstring(LET.tostring(root, encoding='utf-8').decode('utf-8'))
+                            logger.info(f"Successfully parsed XML with lxml recovery parser")
+                        except ImportError:
+                            logger.error("lxml not available for recovery parsing")
+                            raise parse_error
+                        except Exception as lxml_error:
+                            logger.error(f"lxml parse error: {str(lxml_error)}")
+                            raise parse_error
+                    
+                    # 创建章节目录
+                    chapters_dir = os.path.join(doc_dir, "chapters")
+                    os.makedirs(chapters_dir, exist_ok=True)
+                    
+                    # 生成目录文件
+                    doc_title = root.find("title")
+                    doc_title_text = doc_title.text if doc_title is not None else title
+                    
+                    toc_content = f"# {doc_title_text}\n\n"
+                    toc_content += "*Generated on: " + datetime.now().strftime('%Y-%m-%d %H:%M:%S') + "*\n\n"
+                    
+                    # 添加描述
+                    description = root.find("description")
+                    if description is not None and description.text:
+                        toc_content += description.text + "\n\n"
+                    
+                    toc_content += "## Table of Contents\n\n"
+                    
+                    # 处理每个章节
+                    for chapter in root.findall("./chapters/chapter"):
+                        chapter_id = chapter.get("id", "unknown")
+                        chapter_title_elem = chapter.find("title")
+                        chapter_title = chapter_title_elem.text if chapter_title_elem is not None else "Untitled Chapter"
+                        
+                        # 添加到目录
+                        toc_content += f"- [{chapter_title}](chapters/{chapter_id}.md)\n"
+                        
+                        # 为每个章节创建内容
+                        chapter_content = f"# {chapter_title}\n\n"
+                        
+                        # 添加章节描述
+                        chapter_desc = chapter.find("description")
+                        if chapter_desc is not None and chapter_desc.text:
+                            chapter_content += chapter_desc.text + "\n\n"
+                        
+                        # 添加章节的小节
+                        for section in chapter.findall("./sections/section"):
+                            section_title_elem = section.find("title")
+                            section_title = section_title_elem.text if section_title_elem is not None else "Untitled Section"
+                            chapter_content += f"## {section_title}\n\n"
+                            
+                            # 添加小节描述
+                            section_desc = section.find("description")
+                            if section_desc is not None and section_desc.text:
+                                chapter_content += section_desc.text + "\n\n"
+                            
+                            # 列出相关源文件
+                            source_files = section.findall("./source_files/file")
+                            if source_files:
+                                chapter_content += "### Related Source Files\n\n"
+                                for file_elem in source_files:
+                                    if file_elem.text:
+                                        chapter_content += f"- `{file_elem.text}`\n"
+                                chapter_content += "\n"
+    
+                        # 将章节XML转换为字符串，用于传递给process_stage
+                        chapter_xml = ET.tostring(chapter, encoding='unicode')
+    
+                        # 创建章节上下文
+                        chapter_context = {
+                            "chapter_id": chapter_id,
+                            "chapter_title": chapter_title,
+                            "chapter_xml": chapter_xml
+                        }
+    
+                        # 更新任务状态
+                        save_documentation_task(
+                            task_id=request_id,
+                            repo_url=repo_url,
+                            title=title,
+                            status="running",
+                            progress=40 + (list(root.findall("./chapters/chapter")).index(chapter) * 5),
+                            current_stage=f"content_generation_{chapter_id}"
+                        )
+    
+                        try:
+                            # 调用content_generation阶段处理章节
+                            logger.info(f"Starting content generation for chapter {chapter_id}: {chapter_title}")
+                            content_result = await self.process_stage(
+                                repo_url=repo_url,
+                                stage="content_generation",
+                                task_id=request_id,
+                                previous_results=chapter_context,
+                                file_tree=file_tree,
+                                readme=readme,
+                                #chapter_context=chapter_context
+                            )
+
+                            # 存储章节内容生成结果
+                            results[f"content_generation_{chapter_id}"] = content_result
+
+                            # 更新章节内容
+                            generated_content = content_result.content
+                            if generated_content:
+                                chapter_content = generated_content
+    
+                            # 更新阶段状态
+                            save_documentation_stage(
+                                task_id=request_id,
+                                name=f"content_generation_{chapter_id}",
+                                description=f"Completed content generation for '{chapter_title}'",
+                                completed=True,
+                                execution_time=1.0  # 示例执行时间
+                            )
+    
+                            logger.info(f"Completed content generation for chapter {chapter_id}")
+                        except Exception as e:
+                            logger.error(f"Error in content generation for chapter {chapter_id}: {str(e)}")
+                            # 记录错误但继续处理下一个章节
+                            save_documentation_stage(
+                                task_id=request_id,
+                                name=f"content_generation_{chapter_id}",
+                                description=f"Error in content generation for '{chapter_title}'",
+                                completed=False,
+                                error=str(e)
+                            )
+    
+                        # 保存章节文件
+                        chapter_path = os.path.join(chapters_dir, f"{chapter_id}.md")
+                        with open(chapter_path, "w", encoding="utf-8") as f:
+                            f.write(chapter_content)
+    
+                        logger.info(f"Created chapter file: {chapter_path}")
+                    
+                    # 保存目录文件
+                    with open(main_output_path, "w", encoding="utf-8") as f:
+                        f.write(toc_content)
+                    
+                    logger.info(f"Created index file: {main_output_path}")
+                else:
+                    logger.warning(f"Could not find documentation_plan XML tags in planning result")
+                    # 如果找不到XML，使用原始的编译方法
+                    final_content = self._compile_final_documentation_with_fallback(results, title, repo_url)
+                    with open(main_output_path, "w", encoding="utf-8") as f:
+                        f.write(final_content)
+            except Exception as xml_error:
+                logger.error(f"Error parsing XML from planning stage: {str(xml_error)}")
+                # 回退到原始编译方法
+                final_content = self._compile_final_documentation_with_fallback(results, title, repo_url)
+                with open(main_output_path, "w", encoding="utf-8") as f:
+                    f.write(final_content)
+        else:
+            logger.warning(f"No planning result found for task {request_id}")
+            # 如果没有规划结果，使用原始的编译方法
             final_content = self._compile_final_documentation_with_fallback(results, title, repo_url)
-            
-            # 保存到文件
-            with open(output_path, "w", encoding="utf-8") as f:
+            with open(main_output_path, "w", encoding="utf-8") as f:
                 f.write(final_content)
-            
-            # 更新任务状态
+        
+        # 在处理完所有章节的内容生成后，进行优化和质量检查
+        try:
+            # 更新任务状态为优化阶段
             save_documentation_task(
                 task_id=request_id,
                 repo_url=repo_url,
                 title=title,
-                status="completed",
-                progress=100,
-                current_stage=None,
-                completed_at=datetime.now().isoformat(),
-                output_url=f"/api/v2/documentation/file/{os.path.basename(output_path)}"
+                status="running",
+                progress=70,
+                current_stage="optimization"
             )
             
-            logger.info(f"Task {request_id} completed successfully")
-            return output_path
-        
-        except Exception as e:
-            logger.error(f"Error generating documentation: {str(e)}")
+            logger.info(f"Starting optimization stage for task {request_id}")
             
-            try:
-                # 尝试生成基本文档，即使主流程失败
-                basic_content = f"""# {title}
+            # 调用优化阶段
+            optimization_result = await self.process_stage(
+                repo_url=repo_url,
+                stage="optimization",
+                task_id=request_id,
+                previous_results=results,
+                file_tree=file_tree,
+                readme=readme
+            )
+            
+            # 存储优化结果
+            results["optimization"] = optimization_result
+            
+            # 更新阶段状态
+            save_documentation_stage(
+                task_id=request_id,
+                name="optimization",
+                description="Completed optimization",
+                completed=True,
+                execution_time=1.0  # 示例执行时间
+            )
+            
+            logger.info(f"Completed optimization stage for task {request_id}")
+            
+            # 更新任务状态为质量检查阶段
+            save_documentation_task(
+                task_id=request_id,
+                repo_url=repo_url,
+                title=title,
+                status="running",
+                progress=85,
+                current_stage="quality_check"
+            )
+            
+            logger.info(f"Starting quality check stage for task {request_id}")
+            
+            # 调用质量检查阶段
+            quality_check_result = await self.process_stage(
+                repo_url=repo_url,
+                stage="quality_check",
+                task_id=request_id,
+                previous_results=results,
+                file_tree=file_tree,
+                readme=readme
+            )
+            
+            # 存储质量检查结果
+            results["quality_check"] = quality_check_result
+            
+            # 更新阶段状态
+            save_documentation_stage(
+                task_id=request_id,
+                name="quality_check",
+                description="Completed quality check",
+                completed=True,
+                execution_time=1.0  # 示例执行时间
+            )
+            
+            logger.info(f"Completed quality check stage for task {request_id}")
+            
+            # 更新最终文档内容
+            final_content = self._compile_final_documentation(results, title, repo_url)
+            with open(main_output_path, "w", encoding="utf-8") as f:
+                f.write(final_content)
+            
+            logger.info(f"Updated final documentation with optimization and quality check results")
+            
+        except Exception as e:
+            logger.error(f"Error in optimization or quality check stages: {str(e)}")
+            # 记录错误但继续完成任务
+            save_documentation_stage(
+                task_id=request_id,
+                name="optimization",
+                description="Error in optimization",
+                completed=False,
+                error=str(e)
+            )
+            save_documentation_stage(
+                task_id=request_id,
+                name="quality_check",
+                description="Error in quality check",
+                completed=False,
+                error=str(e)
+            )
+
+        # 更新任务状态为完成
+        save_documentation_task(
+            task_id=request_id,
+            repo_url=repo_url,
+            title=title,
+            status="completed",
+            progress=100,
+            current_stage=None,
+            completed_at=datetime.now().isoformat(),
+            output_url=f"/api/v2/documentation/file/{os.path.basename(doc_dir)}/index.md"
+        )
+
+        logger.info(f"Task {request_id} completed successfully")
+        return main_output_path
+        
+        
+        try:
+            # 尝试生成基本文档，即使主流程失败
+            basic_content = f"""# {title}
 
 *Generated on: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}*
 
@@ -863,50 +1180,37 @@ An error occurred during the documentation generation process:
 - Request ID: {request_id}
 
 """
-                
-                # 如果有任何阶段结果，添加它们
-                if results:
-                    basic_content += "\n## Available Content\n\n"
-                    for stage_name, result in results.items():
-                        basic_content += f"\n### {stage_name.replace('_', ' ').title()}\n\n"
-                        basic_content += result.content + "\n\n"
-                
-                # 保存基本文档
-                with open(output_path, "w", encoding="utf-8") as f:
-                    f.write(basic_content)
-                
-                # 更新任务状态为部分完成
-                save_documentation_task(
-                    task_id=request_id,
-                    repo_url=repo_url,
-                    title=title,
-                    status="partial",
-                    error=str(e),
-                    completed_at=datetime.now().isoformat(),
-                    output_url=f"/api/v2/documentation/file/{os.path.basename(output_path)}",
-                    progress=100,
-                    current_stage=None
-                )
-                
-                logger.info(f"Generated basic documentation for failed task {request_id}")
-                return output_path
-                
-            except Exception as inner_e:
-                logger.error(f"Failed to generate basic documentation: {str(inner_e)}")
-                
-                # 更新任务状态
-                save_documentation_task(
-                    task_id=request_id,
-                    repo_url=repo_url,
-                    title=title,
-                    status="failed",
-                    error=f"{str(e)} (Additionally, failed to generate basic documentation: {str(inner_e)})",
-                    completed_at=datetime.now().isoformat(),
-                    progress=0,
-                    current_stage=None
-                )
-                
-                return None
+            
+            # 如果有任何阶段结果，添加它们
+            if results:
+                basic_content += "\n\n## Available Content\n\n"
+                for stage_name, result in results.items():
+                    basic_content += f"\n### {stage_name.replace('_', ' ').title()}\n\n"
+                    basic_content += result.content + "\n\n"
+            
+            # 保存基本文档
+            with open(main_output_path, "w", encoding="utf-8") as f:
+                f.write(basic_content)
+            
+            # 更新任务状态为部分完成
+            save_documentation_task(
+                task_id=request_id,
+                repo_url=repo_url,
+                title=title,
+                status="partial",
+                error=str(e),
+                completed_at=datetime.now().isoformat(),
+                output_url=f"/api/v2/documentation/file/{os.path.basename(doc_dir)}/index.md",
+                progress=100,
+                current_stage=None
+            )
+            
+            logger.info(f"Generated basic documentation for failed task {request_id}")
+            return main_output_path
+            
+        except Exception as fallback_error:
+            logger.error(f"Error generating fallback documentation: {str(fallback_error)}")
+            raise
 
     def _compile_final_documentation_with_fallback(self, results: Dict[str, StageResult], title: str = None, repo_url: str = None) -> str:
         """
@@ -1192,3 +1496,45 @@ def get_documentation_job(request_id: str) -> Optional[DocumentationJob]:
         Documentation job or None if not found
     """
     return documentation_jobs.get(request_id)
+
+def _clean_and_validate_xml(self, xml_content: str) -> str:
+    """
+    清理和验证XML内容
+    
+    Args:
+        xml_content: 原始XML内容
+        
+    Returns:
+        清理后的XML内容
+    """
+    import re
+    
+    # 替换常见的特殊字符
+    
+    cleaned = xml_content.replace("&", "&amp;")
+    # 确保不会替换已经转义的实体
+    cleaned = cleaned.replace("&amp;amp;", "&amp;")
+    cleaned = cleaned.replace("&amp;lt;", "&lt;")
+    cleaned = cleaned.replace("&amp;gt;", "&gt;")
+    
+    # 处理可能的CDATA部分
+    cleaned = re.sub(r'<!\[CDATA\[(.*?)\]\]>', 
+                    lambda m: m.group(1).replace('<', '&lt;').replace('>', '&gt;'), 
+                    cleaned, flags=re.DOTALL)
+    
+    # 修复常见的XML格式问题
+    # 1. 确保所有标签都正确关闭
+    unclosed_tags = re.findall(r'<([a-zA-Z0-9_-]+)[^>]*>[^<]*$', cleaned)
+    for tag in unclosed_tags:
+        cleaned += f"</{tag}>"
+    
+    # 2. 处理可能的嵌套标签问题
+    cleaned = re.sub(r'<([a-zA-Z0-9_-]+)([^>]*)>([^<]*)<([a-zA-Z0-9_-]+)>',
+                    lambda m: f"<{m.group(1)}{m.group(2)}>{m.group(3)}&lt;{m.group(4)}&gt;" 
+                    if m.group(1) != m.group(4) else m.group(0),
+                    cleaned)
+    
+    # 3. 处理可能的属性值问题
+    cleaned = re.sub(r'=([^"\'][a-zA-Z0-9_-]+)', r'="\1"', cleaned)
+    
+    return cleaned

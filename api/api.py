@@ -772,7 +772,7 @@ async def get_documentation_detail(
     """
     # 首先尝试从数据库获取任务
     job = get_documentation_job(request_id)
-    print(job)
+    
     
     # 如果在数据库中找不到，尝试从 task_status 获取
     if not job:

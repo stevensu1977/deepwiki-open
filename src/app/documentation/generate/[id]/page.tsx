@@ -37,6 +37,8 @@ const DocumentationDetailPage: React.FC = () => {
   const [refreshing, setRefreshing] = useState<boolean>(false);
   const [repoUrl, setRepoUrl] = useState<string>(''); // 添加用户输入的仓库URL
   const [showRepoInput, setShowRepoInput] = useState<boolean>(false);
+  const [refreshProgress, setRefreshProgress] = useState<number>(0); // 添加刷新进度状态
+  const [refreshStage, setRefreshStage] = useState<string | null>(null); // 添加刷新阶段状态
   const id = params.id as string;
 
   // 获取文档生成状态
@@ -102,6 +104,8 @@ const DocumentationDetailPage: React.FC = () => {
     
     try {
       setRefreshing(true);
+      setRefreshProgress(0);
+      setRefreshStage('Initializing');
       
       // 调用API强制重新生成文档
       const requestBody = {
@@ -131,8 +135,57 @@ const DocumentationDetailPage: React.FC = () => {
       console.log('Refresh response:', data);
       
       if (data && data.request_id) {
-        // 重定向到新的生成详情页面
-        router.push(`/documentation/generate/${data.request_id}`);
+        // 创建一个重置的状态对象，将所有阶段重置为未完成
+        const resetStatus = {
+          ...status,
+          status: 'pending',
+          progress: 0,
+          current_stage: 'fetching_repository',
+          completed_at: null,
+          output_url: null,
+          error: null,
+          stages: status.stages.map(stage => ({
+            ...stage,
+            completed: false,
+            execution_time: null
+          }))
+        };
+        
+        // 更新状态显示
+        setStatus(resetStatus);
+        
+        // 开始轮询新任务的状态
+        const pollInterval = setInterval(async () => {
+          try {
+            const statusResponse = await fetch(`http://localhost:8001/api/v2/documentation/detail/${data.request_id}`);
+            if (statusResponse.ok) {
+              const statusData = await statusResponse.json();
+              console.log('Refresh status update:', statusData);
+              
+              // 更新状态
+              setStatus(statusData);
+              setRefreshProgress(statusData.progress);
+              setRefreshStage(statusData.current_stage);
+              
+              // 如果完成或失败，清除轮询
+              if (['completed', 'failed'].includes(statusData.status)) {
+                clearInterval(pollInterval);
+                setRefreshing(false);
+              }
+            }
+          } catch (err) {
+            console.error('Error polling refresh status:', err);
+          }
+        }, 2000);
+        
+        // 设置超时，防止轮询无限进行
+        setTimeout(() => {
+          clearInterval(pollInterval);
+          if (refreshing) {
+            setRefreshing(false);
+            fetchStatus(); // 获取最终状态
+          }
+        }, 10 * 60 * 1000); // 10分钟超时
       } else {
         throw new Error('Invalid response from server: missing request_id');
       }
@@ -140,6 +193,8 @@ const DocumentationDetailPage: React.FC = () => {
       console.error('Error refreshing documentation:', err);
       alert(`Failed to refresh documentation: ${err instanceof Error ? err.message : 'Unknown error'}`);
       setRefreshing(false);
+      setRefreshProgress(0);
+      setRefreshStage(null);
     }
   };
 
@@ -279,7 +334,7 @@ const DocumentationDetailPage: React.FC = () => {
         )}
         
         {status.status === 'completed' && status.output_url && (
-          <div className="mb-6 flex flex-col space-y-3 max-w-md mx-auto">
+          <div className="mb-6 flex flex-col space-y-3">
             <Link 
               href={`/documentation/view/${status.output_url.split('/').pop()?.replace('.md', '')}`}
               className="flex items-center justify-center px-4 py-2 bg-green-600 text-white rounded hover:bg-green-700 text-center w-full"
@@ -299,6 +354,31 @@ const DocumentationDetailPage: React.FC = () => {
               <FaSync className={`mr-2 ${refreshing ? 'animate-spin' : ''}`} /> 
               {refreshing ? 'Refreshing...' : 'Refresh Documentation'}
             </button>
+            
+            {/* 添加刷新进度显示 */}
+            
+          </div>
+        )}
+        
+        {/* 对于非完成状态，也添加刷新按钮和进度条 */}
+        {status.status !== 'completed' && (
+          <div className="mb-6 flex flex-col space-y-3">
+            
+            
+            {status.status === 'failed' && (
+              <button 
+                onClick={refreshDocumentation}
+                disabled={refreshing}
+                className={`flex items-center justify-center px-4 py-2 rounded w-full ${
+                  refreshing 
+                    ? 'bg-gray-400 text-gray-200 cursor-not-allowed' 
+                    : 'bg-orange-500 text-white hover:bg-orange-600'
+                }`}
+              >
+                <FaSync className={`mr-2 ${refreshing ? 'animate-spin' : ''}`} /> 
+                {refreshing ? 'Refreshing...' : 'Retry Documentation Generation'}
+              </button>
+            )}
           </div>
         )}
         
