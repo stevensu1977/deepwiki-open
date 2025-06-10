@@ -3,13 +3,14 @@
 import React, { useState, useEffect } from 'react';
 import { useParams } from 'next/navigation';
 import Link from 'next/link';
-import { FaHome, FaArrowLeft } from 'react-icons/fa';
+import { FaHome, FaArrowLeft, FaSun, FaMoon } from 'react-icons/fa';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import rehypeRaw from 'rehype-raw';
 import { Prism as SyntaxHighlighter } from 'react-syntax-highlighter';
 import { vscDarkPlus } from 'react-syntax-highlighter/dist/esm/styles/prism';
 import Mermaid from '@/components/Mermaid';
+import { useTheme } from 'next-themes';
 
 interface DocContent {
   content: string;
@@ -31,6 +32,11 @@ export default function WikiDocPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [docTitle, setDocTitle] = useState<string>('Documentation');
+  const { theme, setTheme } = useTheme();
+
+  const toggleDarkMode = () => {
+    setTheme(theme === 'dark' ? 'light' : 'dark');
+  };
 
   useEffect(() => {
     const fetchDocumentation = async () => {
@@ -313,6 +319,13 @@ export default function WikiDocPage() {
               <FaArrowLeft className="w-4 h-4 mr-2" />
               <span>Back to Documentation</span>
             </Link>
+            <button 
+            onClick={toggleDarkMode}
+            className={`p-2 rounded-md ${theme === 'dark' ? 'hover:bg-gray-700' : 'hover:bg-gray-100'}`}
+            title={theme === 'dark' ? "Switch to light mode" : "Switch to dark mode"}
+          >
+            {theme === 'dark' ? <FaSun /> : <FaMoon />}
+          </button>
           </div>
         </div>
       </header>
