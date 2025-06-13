@@ -1,10 +1,11 @@
 'use client';
 
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
-import { FaWikipediaW, FaGithub, FaGitlab, FaBitbucket } from 'react-icons/fa';
+import { FaWikipediaW, FaGithub, FaGitlab, FaBitbucket, FaStar, FaArrowRight, FaPlus } from 'react-icons/fa';
 import ThemeToggle from '@/components/theme-toggle';
 import Mermaid from '../components/Mermaid';
+import AddRepositoryModal from '@/components/AddRepositoryModal';
 
 // Define the demo mermaid charts outside the component
 const DEMO_FLOW_CHART = `graph TD
@@ -35,15 +36,110 @@ const DEMO_SEQUENCE_CHART = `sequenceDiagram
   %% Add a note to make text more visible
   Note over User,GitHub: DeepWiki supports sequence diagrams for visualizing interactions`;
 
+// Interface for completed documentation items
+interface CompletedDocumentationItem {
+  request_id: string;
+  title: string;
+  repo_url: string;
+  owner: string;
+  repo: string;
+  description?: string;
+  completed_at: string;
+  output_url?: string;
+}
+
+
+
 export default function Home() {
   const router = useRouter();
-  const [repositoryInput, setRepositoryInput] = useState('https://github.com/AsyncFuncAI/deepwiki-open');
-  const [showTokenInputs, setShowTokenInputs] = useState(false);
-  const [localOllama, setLocalOllama] = useState(false);
-  const [selectedPlatform, setSelectedPlatform] = useState<'github' | 'gitlab' | 'bitbucket'>('github');
-  const [accessToken, setAccessToken] = useState('');
-  const [error, setError] = useState<string | null>(null);
-  const [isSubmitting, setIsSubmitting] = useState(false);
+  const [completedDocs, setCompletedDocs] = useState<CompletedDocumentationItem[]>([]);
+  const [isLoadingDocs, setIsLoadingDocs] = useState(true);
+  const [isModalOpen, setIsModalOpen] = useState(false);
+
+  // Get API base URL from environment variables
+  const API_BASE_URL = process.env.NEXT_PUBLIC_API_BASE_URL || 'http://localhost:8002';
+
+  // Load completed documentation on component mount
+  useEffect(() => {
+    const loadCompletedDocs = async () => {
+      try {
+        const response = await fetch(`${API_BASE_URL}/api/v2/documentation/completed?limit=6`);
+
+        if (response.ok) {
+          const data = await response.json();
+          setCompletedDocs(data.items || []);
+        }
+      } catch (error) {
+        console.error('Error loading completed documentation:', error);
+      } finally {
+        setIsLoadingDocs(false);
+      }
+    };
+
+    loadCompletedDocs();
+  }, []);
+
+  // Handle Add Repo card click
+  const handleAddRepoClick = () => {
+    setIsModalOpen(true);
+  };
+
+  // Handle modal repository submission
+  const handleModalSubmit = async (repoUrl: string) => {
+    console.log('🚀 Starting repository submission:', repoUrl);
+
+    try {
+      // Parse repository input
+      const parsedRepo = parseRepositoryInput(repoUrl);
+
+      if (!parsedRepo) {
+        console.error('❌ Invalid repository format:', repoUrl);
+        return;
+      }
+
+      const { owner, repo, type } = parsedRepo;
+      console.log('✅ Parsed repository:', { owner, repo, type });
+
+      // Construct the full repository URL
+      const fullRepoUrl = type === 'github'
+        ? `https://github.com/${owner}/${repo}`
+        : type === 'gitlab'
+        ? `https://gitlab.com/${owner}/${repo}`
+        : `https://bitbucket.org/${owner}/${repo}`;
+
+      // Prepare the request body for the new API
+      const requestBody = {
+        repo_url: fullRepoUrl,
+        title: `${owner}/${repo} Documentation`,
+        force: false
+      };
+
+      // Call the new documentation generation API
+      const response = await fetch(`${API_BASE_URL}/api/v2/documentation/generate`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify(requestBody)
+      });
+
+      if (!response.ok) {
+        const errorData = await response.json().catch(() => ({ message: 'Unknown error' }));
+        throw new Error(errorData.message || `HTTP ${response.status}: ${response.statusText}`);
+      }
+
+      const result = await response.json();
+      console.log('✅ API Response:', result);
+
+      // Navigate to the job page to show progress
+      const jobUrl = `/job/${owner}/${repo}/${result.request_id}`;
+      console.log('🔄 Navigating to:', jobUrl);
+      router.push(jobUrl);
+
+    } catch (err) {
+      console.error('❌ Error submitting documentation generation:', err);
+    }
+  };
 
   // Parse repository URL/input and extract owner and repo
   const parseRepositoryInput = (input: string): { owner: string, repo: string, type: string, fullPath?: string } | null => {
@@ -103,52 +199,7 @@ export default function Home() {
     return { owner, repo, type, fullPath };
   };
 
-  const handleFormSubmit = (e: React.FormEvent) => {
-    e.preventDefault();
-    
-    // Prevent multiple submissions
-    if (isSubmitting) {
-      console.log('Form submission already in progress, ignoring duplicate click');
-      return;
-    }
-    
-    setIsSubmitting(true);
-    
-    // Parse repository input
-    const parsedRepo = parseRepositoryInput(repositoryInput);
-    
-    if (!parsedRepo) {
-      setError('Invalid repository format. Use "owner/repo", "https://github.com/owner/repo", "https://gitlab.com/owner/repo", or "https://bitbucket.org/owner/repo" format.');
-      setIsSubmitting(false);
-      return;
-    }
-    
-    const { owner, repo, type } = parsedRepo;
-    
-    // Store tokens in query params if they exist
-    const params = new URLSearchParams();
-    if (accessToken) {
-      if (selectedPlatform === 'github') {
-        params.append('github_token', accessToken);
-      } else if (selectedPlatform === 'gitlab') {
-        params.append('gitlab_token', accessToken);
-      } else if (selectedPlatform === 'bitbucket') {
-        params.append('bitbucket_token', accessToken);
-      }
-    }
-    if (type !== 'github') {
-      params.append('type', type);
-    }
-    // Add local_ollama parameter
-    params.append('local_ollama', localOllama.toString());
-    
-    const queryString = params.toString() ? `?${params.toString()}` : '';
-    
-    // Navigate to the dynamic route
-    router.push(`/${owner}/${repo}${queryString}`);
-    
-    // The isSubmitting state will be reset when the component unmounts during navigation
-  };
+
 
   return (
     <div className="h-screen bg-gray-100 dark:bg-gray-900 p-4 md:p-8 flex flex-col">
@@ -159,180 +210,142 @@ export default function Home() {
             <h1 className="text-xl md:text-2xl font-bold text-gray-800 dark:text-gray-200">DeepWiki</h1>
           </div>
 
-          <form onSubmit={handleFormSubmit} className="flex flex-col gap-2">
-            <div className="flex flex-col sm:flex-row gap-2">
-              <div className="relative flex-1">
-                <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
-                  {
-                    repositoryInput.includes('gitlab.com') 
-                    ? <FaGitlab className="text-gray-400" /> 
-                    : repositoryInput.includes('bitbucket.org') 
-                    ? <FaBitbucket className="text-gray-400" /> 
-                    : <FaGithub className="text-gray-400" />
-                  }
-                </div>
-                <input
-                  type="text"
-                  value={repositoryInput}
-                  onChange={(e) => setRepositoryInput(e.target.value)}
-                  placeholder="owner/repo or GitHub/GitLab/Bitbucket URL"
-                  className="block w-full pl-10 pr-3 py-2 border border-gray-300 dark:border-gray-700 rounded-md bg-white dark:bg-gray-800 text-gray-800 dark:text-gray-200 focus:outline-none focus:ring-2 focus:ring-purple-500"
-                />
-                {error && (
-                  <div className="text-red-500 text-xs mt-1">
-                    {error}
-                  </div>
-                )}
-              </div>
-              <button
-                type="submit"
-                className="px-4 py-2 bg-purple-600 text-white rounded-md hover:bg-purple-700 focus:outline-none focus:ring-2 focus:ring-purple-500 disabled:opacity-50 disabled:cursor-not-allowed"
-                disabled={isSubmitting}
-              >
-                {isSubmitting ? 'Processing...' : 'Generate Wiki'}
-              </button>
-            </div>
-            <div className="flex flex-col w-full space-y-2">
-              <div className="flex items-center">
-                <input
-                  id="local-ollama"
-                  type="checkbox"
-                  checked={localOllama}
-                  onChange={(e) => setLocalOllama(e.target.checked)}
-                  className="h-4 w-4 rounded border-gray-300 text-purple-600 focus:ring-purple-500"
-                />
-                <label htmlFor="local-ollama" className="ml-2 text-xs text-gray-700 dark:text-gray-300">
-                  Local Ollama Model (Experimental)
-                </label>
-              </div>
-            </div>
-            <div className="flex items-center relative">
-              <button
-                type="button"
-                onClick={() => setShowTokenInputs(!showTokenInputs)}
-                className="text-xs text-purple-600 dark:text-purple-400 hover:text-purple-800 dark:hover:text-purple-300 flex items-center"
-              >
-                {showTokenInputs ? '- Hide access tokens' : '+ Add access tokens for private repositories'}
-              </button>
-              {showTokenInputs && (
-                <>
-                  <div className="fixed inset-0 bg-black/20 dark:bg-black/40 z-40" onClick={() => setShowTokenInputs(false)} />
-                  <div className="absolute left-0 right-0 top-full mt-2 z-50">
-                    <div className="flex flex-col gap-2 p-3 bg-white dark:bg-gray-800 rounded-md border border-gray-200 dark:border-gray-700 shadow-lg">
-                      <div className="flex justify-between items-center">
-                        <h3 className="text-sm font-medium text-gray-700 dark:text-gray-300">Access Token</h3>
-                        <button
-                          type="button"
-                          onClick={() => setShowTokenInputs(false)}
-                          className="text-gray-400 hover:text-gray-500 dark:hover:text-gray-300"
-                        >
-                          <span className="sr-only">Close</span>
-                          <svg className="h-5 w-5" viewBox="0 0 20 20" fill="currentColor">
-                            <path fillRule="evenodd" d="M4.293 4.293a1 1 0 011.414 0L10 8.586l4.293-4.293a1 1 0 111.414 1.414L11.414 10l4.293 4.293a1 1 0 01-1.414 1.414L10 11.414l-4.293 4.293a1 1 0 01-1.414-1.414L8.586 10 4.293 5.707a1 1 0 010-1.414z" clipRule="evenodd" />
-                          </svg>
-                        </button>
-                      </div>
-                      <div>
-                        <label className="block text-xs font-medium text-gray-700 dark:text-gray-300 mb-1">
-                          Select Platform
-                        </label>
-                        <div className="flex gap-2">
-                          <button
-                            type="button"
-                            onClick={() => setSelectedPlatform('github')}
-                            className={`flex-1 flex items-center justify-center gap-2 px-3 py-2 rounded-md border ${
-                              selectedPlatform === 'github'
-                                ? 'bg-gray-200 dark:bg-gray-700 border-purple-500 text-purple-600 dark:text-purple-400'
-                                : 'border-gray-300 dark:border-gray-700 text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700'
-                            }`}
-                          >
-                            <FaGithub className="text-lg" />
-                            <span className="text-xs">GitHub</span>
-                          </button>
-                          <button
-                            type="button"
-                            onClick={() => setSelectedPlatform('gitlab')}
-                            className={`flex-1 flex items-center justify-center gap-2 px-3 py-2 rounded-md border ${
-                              selectedPlatform === 'gitlab'
-                                ? 'bg-gray-200 dark:bg-gray-700 border-purple-500 text-purple-600 dark:text-purple-400'
-                                : 'border-gray-300 dark:border-gray-700 text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700'
-                            }`}
-                          >
-                            <FaGitlab className="text-lg" />
-                            <span className="text-xs">GitLab</span>
-                          </button>
-                          <button
-                            type="button"
-                            onClick={() => setSelectedPlatform('bitbucket')}
-                            className={`flex-1 flex items-center justify-center gap-2 px-3 py-2 rounded-md border ${
-                              selectedPlatform === 'bitbucket'
-                                ? 'bg-gray-200 dark:bg-gray-700 border-purple-500 text-purple-600 dark:text-purple-400'
-                                : 'border-gray-300 dark:border-gray-700 text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700'
-                            }`}
-                          >
-                            <FaBitbucket className="text-lg" />
-                            <span className="text-xs">Bitbucket</span>
-                          </button>
-                        </div>
-                      </div>
-                      <div>
-                        <label htmlFor="access-token" className="block text-xs font-medium text-gray-700 dark:text-gray-300 mb-1">
-                          {selectedPlatform.charAt(0).toUpperCase() + selectedPlatform.slice(1)} Token (for private repositories)
-                        </label>
-                        <input
-                          id="access-token"
-                          type="password"
-                          value={accessToken}
-                          onChange={(e) => setAccessToken(e.target.value)}
-                          placeholder={`${selectedPlatform.charAt(0).toUpperCase() + selectedPlatform.slice(1)} personal access token`}
-                          className="block w-full px-3 py-2 border border-gray-300 dark:border-gray-700 rounded-md bg-white dark:bg-gray-800 text-gray-800 dark:text-gray-200 focus:outline-none focus:ring-2 focus:ring-purple-500 text-xs"
-                        />
-                        <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">
-                          Token is stored in memory only and never persisted.
-                        </p>
-                      </div>
-                    </div>
-                  </div>
-                </>
-              )}
-            </div>
-          </form>
+
         </div>
       </header>
 
       <main className="flex-1 max-w-6xl mx-auto overflow-y-auto">
-        <div className="h-full overflow-y-auto flex flex-col items-center justify-center p-8 bg-white dark:bg-gray-800 rounded-lg shadow-lg">
-          <FaWikipediaW className="text-5xl text-purple-500 mb-4" />
-          <h2 className="text-xl font-bold text-gray-800 dark:text-gray-200 mb-2">Welcome to DeepWiki (Open Source)</h2>
-          <p className="text-gray-600 dark:text-gray-400 text-center mb-4">
-            Enter a GitHub or GitLab or Bitbucket repository to generate a comprehensive wiki based on its structure.
-          </p>
-          <div className="text-gray-500 dark:text-gray-500 text-sm text-center mb-6">
-            <p className="mb-2">You can enter a repository in these formats:</p>
-            <ul className="list-disc list-inside mb-2">
-              <li>https://github.com/AsyncFuncAI/deepwiki-open</li>
-              <li>https://github.com/openai/codex</li>
-              <li>https://gitlab.com/gitlab-org/gitlab</li>
-              <li>https://bitbucket.org/atlassian/atlaskit</li>
-            </ul>
+        <div className="h-full overflow-y-auto">
+          {/* Search Section */}
+          <div className="mb-8 text-center">
+            <h2 className="text-2xl font-bold text-gray-800 dark:text-gray-200 mb-4">
+              Which repo would you like to understand?
+            </h2>
           </div>
 
-          <div className="w-full max-w-md mt-4 bg-gray-50 dark:bg-gray-700/30 rounded-lg p-4">
-            <h3 className="text-sm font-semibold text-gray-700 dark:text-gray-300 mb-2">Now with Mermaid Diagram Support!</h3>
-            <div className="text-xs text-gray-600 dark:text-gray-400 mb-3">
-              DeepWiki supports both flow diagrams and sequence diagrams to help visualize:
+          {/* Repository Cards Grid */}
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+            {/* Add Repo Card */}
+            <div
+              className="bg-purple-100 dark:bg-purple-900/20 rounded-lg p-4 border-2 border-dashed border-purple-300 dark:border-purple-700 hover:border-purple-400 dark:hover:border-purple-600 transition-colors cursor-pointer group"
+              onClick={handleAddRepoClick}
+            >
+              <div className="flex items-center justify-between">
+                <div>
+                  <div className="flex items-center mb-2">
+                    <FaPlus className="text-purple-500 mr-2" />
+                    <span className="font-medium text-gray-800 dark:text-gray-200">Add repo</span>
+                  </div>
+                  <p className="text-sm text-gray-600 dark:text-gray-400">
+                    Click to add a new repository
+                  </p>
+                </div>
+                <FaArrowRight className="text-purple-400 group-hover:text-purple-500 transition-colors" />
+              </div>
             </div>
 
-            <div className="mb-4">
-              <h4 className="text-xs font-medium text-gray-600 dark:text-gray-400 mb-1">Flow Diagram Example:</h4>
-              <Mermaid chart={DEMO_FLOW_CHART} />
-            </div>
+            {/* Loading State */}
+            {isLoadingDocs && (
+              <>
+                {[...Array(5)].map((_, i) => (
+                  <div key={i} className="bg-white dark:bg-gray-800 rounded-lg p-4 shadow-sm animate-pulse">
+                    <div className="flex items-center justify-between mb-3">
+                      <div className="flex-1">
+                        <div className="h-4 bg-gray-200 dark:bg-gray-700 rounded mb-2 w-3/4"></div>
+                        <div className="h-3 bg-gray-200 dark:bg-gray-700 rounded w-full"></div>
+                      </div>
+                      <div className="h-4 w-4 bg-gray-200 dark:bg-gray-700 rounded ml-2"></div>
+                    </div>
+                    <div className="flex items-center justify-between">
+                      <div className="h-3 bg-gray-200 dark:bg-gray-700 rounded w-1/3"></div>
+                      <div className="h-4 w-4 bg-gray-200 dark:bg-gray-700 rounded"></div>
+                    </div>
+                  </div>
+                ))}
+              </>
+            )}
 
-            <div>
-              <h4 className="text-xs font-medium text-gray-600 dark:text-gray-400 mb-1">Sequence Diagram Example:</h4>
-              <Mermaid chart={DEMO_SEQUENCE_CHART} />
-            </div>
+            {/* Completed Documentation Cards */}
+            {!isLoadingDocs && completedDocs.map((doc) => (
+              <div
+                key={doc.request_id}
+                className="bg-white dark:bg-gray-800 rounded-lg p-4 shadow-sm hover:shadow-md transition-shadow cursor-pointer group"
+                onClick={() => router.push(`/wiki/${doc.owner}/${doc.repo}`)}
+              >
+                <div className="flex items-center justify-between mb-3">
+                  <div className="flex-1 min-w-0">
+                    <h3 className="font-medium text-gray-800 dark:text-gray-200 group-hover:text-purple-600 dark:group-hover:text-purple-400 transition-colors truncate">
+                      {doc.owner}/{doc.repo}
+                    </h3>
+                    <p className="text-sm text-gray-600 dark:text-gray-400 mt-1 line-clamp-2">
+                      {doc.description || `Documentation for ${doc.owner}/${doc.repo}`}
+                    </p>
+                  </div>
+                  <FaArrowRight className="text-gray-400 group-hover:text-purple-500 transition-colors ml-2 flex-shrink-0" />
+                </div>
+                <div className="flex items-center justify-between text-xs text-gray-500 dark:text-gray-400">
+                  <div className="flex items-center">
+                    {doc.repo_url.includes('github.com') && <FaGithub className="mr-1" />}
+                    {doc.repo_url.includes('gitlab.com') && <FaGitlab className="mr-1" />}
+                    {doc.repo_url.includes('bitbucket.org') && <FaBitbucket className="mr-1" />}
+                    <span>{new Date(doc.completed_at).toLocaleDateString()}</span>
+                  </div>
+                  <FaStar className="text-yellow-400" />
+                </div>
+              </div>
+            ))}
+
+            {/* Empty State - Show welcome message if no docs and not loading */}
+            {!isLoadingDocs && completedDocs.length === 0 && (
+              <>
+                {[...Array(2)].map((_, i) => (
+                  <div key={i} className="bg-gray-50 dark:bg-gray-800/50 rounded-lg p-4 border-2 border-dashed border-gray-200 dark:border-gray-700">
+                    <div className="flex items-center justify-between mb-3">
+                      <div className="flex-1">
+                        <h3 className="font-medium text-gray-400 dark:text-gray-500">
+                          {i === 0 ? 'your-org/awesome-project' : 'example/repository'}
+                        </h3>
+                        <p className="text-sm text-gray-400 dark:text-gray-500 mt-1">
+                          Generate documentation for your repositories
+                        </p>
+                      </div>
+                      <FaArrowRight className="text-gray-300 dark:text-gray-600" />
+                    </div>
+                    <div className="flex items-center justify-between text-xs text-gray-400 dark:text-gray-500">
+                      <div className="flex items-center">
+                        <FaGithub className="mr-1" />
+                        <span>--/--/----</span>
+                      </div>
+                      <FaStar className="text-gray-300 dark:text-gray-600" />
+                    </div>
+                  </div>
+                ))}
+              </>
+            )}
           </div>
+
+          {/* Welcome Section - Only show if no docs */}
+          {!isLoadingDocs && completedDocs.length === 0 && (
+            <div className="mt-12 text-center">
+              <FaWikipediaW className="text-5xl text-purple-500 mb-4 mx-auto" />
+              <h3 className="text-xl font-bold text-gray-800 dark:text-gray-200 mb-2">Welcome to DeepWiki</h3>
+              <p className="text-gray-600 dark:text-gray-400 mb-6 max-w-2xl mx-auto">
+                Enter a GitHub, GitLab, or Bitbucket repository above to generate comprehensive documentation with AI-powered analysis and interactive diagrams.
+              </p>
+
+              <div className="max-w-4xl mx-auto grid grid-cols-1 md:grid-cols-2 gap-6">
+                <div className="bg-gray-50 dark:bg-gray-700/30 rounded-lg p-4">
+                  <h4 className="text-sm font-semibold text-gray-700 dark:text-gray-300 mb-2">Flow Diagram Example:</h4>
+                  <Mermaid chart={DEMO_FLOW_CHART} />
+                </div>
+
+                <div className="bg-gray-50 dark:bg-gray-700/30 rounded-lg p-4">
+                  <h4 className="text-sm font-semibold text-gray-700 dark:text-gray-300 mb-2">Sequence Diagram Example:</h4>
+                  <Mermaid chart={DEMO_SEQUENCE_CHART} />
+                </div>
+              </div>
+            </div>
+          )}
         </div>
       </main>
 
@@ -342,6 +355,13 @@ export default function Home() {
           <ThemeToggle />
         </div>
       </footer>
+
+      {/* Add Repository Modal */}
+      <AddRepositoryModal
+        isOpen={isModalOpen}
+        onClose={() => setIsModalOpen(false)}
+        onSubmit={handleModalSubmit}
+      />
     </div>
   );
 }

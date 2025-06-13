@@ -31,6 +31,9 @@ const DocumentationViewPage: React.FC = () => {
   const [content, setContent] = useState<string>('');
   const [loading, setLoading] = useState<boolean>(true);
   const [error, setError] = useState<string | null>(null);
+
+  // Get API base URL from environment variables
+  const API_BASE_URL = process.env.NEXT_PUBLIC_API_BASE_URL || 'http://localhost:8002';
   const [headings, setHeadings] = useState<HeadingInfo[]>([]);
   const [activeHeading, setActiveHeading] = useState<string>('');
   const contentRef = useRef<HTMLDivElement>(null);
@@ -41,7 +44,7 @@ const DocumentationViewPage: React.FC = () => {
     const fetchDocumentation = async () => {
       try {
         setLoading(true);
-        const response = await fetch(`http://localhost:8001/api/v2/documentation/file/${id}.md`);
+        const response = await fetch(`${API_BASE_URL}/api/v2/documentation/file/${id}.md`);
         
         if (!response.ok) {
           throw new Error(`Error: ${response.status}`);

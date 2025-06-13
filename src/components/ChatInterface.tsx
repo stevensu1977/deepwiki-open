@@ -10,9 +10,7 @@ import { Prism as SyntaxHighlighter } from 'react-syntax-highlighter';
 import { vscDarkPlus } from 'react-syntax-highlighter/dist/esm/styles/prism';
 import Mermaid from './Mermaid';
 import MCPSettings from './MCPSettings';
-
-// 定义服务器基础URL
-const SERVER_BASE_URL = process.env.NEXT_PUBLIC_SERVER_BASE_URL || 'http://localhost:8001';
+import { getChatUrls } from '../config/api';
 
 // 在组件外部定义 Markdown 渲染组件
 const components = {
@@ -311,7 +309,7 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({
       }
       
       // 使用新的 v2 端点
-      const apiResponse = await fetch(`${SERVER_BASE_URL}/chat/completions/stream/v2`, {
+      const apiResponse = await fetch(getChatUrls().completionsStreamV2, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',

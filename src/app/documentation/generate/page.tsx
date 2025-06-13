@@ -10,6 +10,9 @@ const DocumentationGeneratorPage: React.FC = () => {
   const [error, setError] = useState<string | null>(null);
   const router = useRouter();
 
+  // Get API base URL from environment variables
+  const API_BASE_URL = process.env.NEXT_PUBLIC_API_BASE_URL || 'http://localhost:8002';
+
   // 开始生成文档
   const startGeneration = async () => {
     if (!repoUrl || !title) {
@@ -21,7 +24,7 @@ const DocumentationGeneratorPage: React.FC = () => {
     setError(null);
     
     try {
-      const response = await fetch('http://localhost:8001/api/v2/documentation/generate', {
+      const response = await fetch(`${API_BASE_URL}/api/v2/documentation/generate`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -37,9 +40,17 @@ const DocumentationGeneratorPage: React.FC = () => {
       }
       
       const data = await response.json();
-      
-      // 导航到详情页面
-      router.push(`/documentation/generate/${data.request_id}`);
+
+      // Extract owner and repo from repo URL for new job URL format
+      const urlMatch = repoUrl.match(/github\.com\/([^\/]+)\/([^\/]+)/);
+      if (urlMatch) {
+        const [, owner, repo] = urlMatch;
+        // 导航到新的job详情页面
+        router.push(`/job/${owner}/${repo}/${data.request_id}`);
+      } else {
+        // Fallback to old format if URL parsing fails
+        router.push(`/documentation/generate/${data.request_id}`);
+      }
     } catch (err) {
       console.error('Error starting documentation generation:', err);
       setError('Failed to start documentation generation');

@@ -14,7 +14,7 @@ export default function ChatPage() {
   const repo = params.repo as string;
   
   const handleBack = () => {
-    router.push(`/${owner}/${repo}`);
+    router.push(`/wiki/${owner}/${repo}`);
   };
   
   const toggleDarkMode = () => {

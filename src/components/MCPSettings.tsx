@@ -20,23 +20,30 @@ const MCPSettings: React.FC<MCPSettingsProps> = ({ onClose, isDarkMode }) => {
   const [servers, setServers] = useState<MCPServer[]>([]);
   const [newServerUrl, setNewServerUrl] = useState('');
   const [newServerAuth, setNewServerAuth] = useState(''); // 添加 auth 状态
-  
+  const [isLoaded, setIsLoaded] = useState(false); // 添加加载状态标记
+
   // 加载已保存的服务器列表
   useEffect(() => {
     const savedServers = localStorage.getItem('mcpServers');
     if (savedServers) {
       try {
-        setServers(JSON.parse(savedServers));
+        const parsedServers = JSON.parse(savedServers);
+        console.log('Loading saved MCP servers:', parsedServers);
+        setServers(parsedServers);
       } catch (e) {
         console.error('Failed to parse saved servers', e);
       }
     }
+    setIsLoaded(true); // 标记为已加载
   }, []);
-  
-  // 保存服务器列表到本地存储
+
+  // 保存服务器列表到本地存储（只在加载完成后保存）
   useEffect(() => {
-    localStorage.setItem('mcpServers', JSON.stringify(servers));
-  }, [servers]);
+    if (isLoaded) {
+      console.log('Saving MCP servers to localStorage:', servers);
+      localStorage.setItem('mcpServers', JSON.stringify(servers));
+    }
+  }, [servers, isLoaded]);
   
   const addServer = () => {
     if (!newServerUrl.trim()) return;
@@ -138,10 +145,11 @@ const MCPSettings: React.FC<MCPSettingsProps> = ({ onClose, isDarkMode }) => {
         
         {/* 服务器列表 */}
         <h3 className="text-lg font-semibold mb-4">Server List</h3>
-        
+
         {servers.length === 0 ? (
           <div className={`text-center py-6 ${isDarkMode ? 'text-gray-400' : 'text-gray-500'}`}>
             No MCP servers added yet
+            {!isLoaded && <div className="text-xs mt-2">Loading...</div>}
           </div>
         ) : (
           <div className="space-y-3">

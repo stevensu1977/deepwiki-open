@@ -32,3 +32,94 @@ body {
 .shadow-custom {
   box-shadow: 0 10px 15px -3px var(--shadow-color), 0 4px 6px -2px var(--shadow-color);
 }
+
+/* Custom markdown styles - now using ReactMarkdown components for main styling */
+.markdown-content {
+  line-height: 1.7;
+  color: var(--foreground);
+}
+
+/* Additional markdown styles for elements not handled by components */
+
+.markdown-content blockquote {
+  margin: 1.5rem 0;
+  padding-left: 1rem;
+  border-left: 4px solid #e5e7eb;
+  font-style: italic;
+  color: #6b7280;
+}
+
+[data-theme='dark'] .markdown-content blockquote {
+  border-left-color: #4b5563;
+  color: #9ca3af;
+}
+
+.markdown-content strong {
+  font-weight: 600;
+}
+
+.markdown-content em {
+  font-style: italic;
+}
+
+.markdown-content a {
+  color: #3b82f6;
+  text-decoration: underline;
+}
+
+.markdown-content a:hover {
+  color: #1d4ed8;
+}
+
+[data-theme='dark'] .markdown-content a {
+  color: #60a5fa;
+}
+
+[data-theme='dark'] .markdown-content a:hover {
+  color: #93c5fd;
+}
+
+.markdown-content table {
+  width: 100%;
+  margin: 1.5rem 0;
+  border-collapse: collapse;
+}
+
+.markdown-content th,
+.markdown-content td {
+  padding: 0.75rem;
+  border: 1px solid #e5e7eb;
+  text-align: left;
+}
+
+.markdown-content th {
+  background-color: #f9fafb;
+  font-weight: 600;
+}
+
+[data-theme='dark'] .markdown-content th,
+[data-theme='dark'] .markdown-content td {
+  border-color: #4b5563;
+}
+
+[data-theme='dark'] .markdown-content th {
+  background-color: #374151;
+}
+
+.markdown-content hr {
+  margin: 2rem 0;
+  border: none;
+  border-top: 1px solid #e5e7eb;
+}
+
+[data-theme='dark'] .markdown-content hr {
+  border-top-color: #4b5563;
+}
+
+/* Line clamp utilities */
+.line-clamp-2 {
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
