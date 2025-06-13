@@ -30,11 +30,14 @@ from api.rag import RAG
 
 # Import the DocumentationAgent
 from api.documentation_agent import (
-    DocumentationAgent, 
-    DocumentationJob, 
+    DocumentationAgent,
+    DocumentationJob,
     documentation_jobs,
     generate_request_id
 )
+
+# Import search tools
+from api.search_tools import DocumentSearchTool, execute_search_tool
 
 # Configure logging
 logging.basicConfig(
@@ -151,6 +154,73 @@ class DocumentationDetailResponse(BaseModel):
     output_url: Optional[str] = Field(None, description="URL to the generated documentation")
     repo_url: Optional[str] = Field(None, description="Repository URL")
 
+class DocumentationDeleteResponse(BaseModel):
+    """Documentation task deletion response"""
+    request_id: str = Field(..., description="Request ID")
+    success: bool = Field(..., description="Whether deletion was successful")
+    message: str = Field(..., description="Response message")
+
+class DocumentationResetResponse(BaseModel):
+    """Documentation task reset response"""
+    request_id: str = Field(..., description="Request ID")
+    success: bool = Field(..., description="Whether reset was successful")
+    message: str = Field(..., description="Response message")
+
+class CompletedDocumentationItem(BaseModel):
+    """Completed documentation item for listing"""
+    request_id: str = Field(..., description="Request ID")
+    title: str = Field(..., description="Documentation title")
+    repo_url: str = Field(..., description="Repository URL")
+    owner: str = Field(..., description="Repository owner")
+    repo: str = Field(..., description="Repository name")
+    description: Optional[str] = Field(None, description="Repository description")
+    completed_at: str = Field(..., description="Completion timestamp")
+    output_url: Optional[str] = Field(None, description="Output URL")
+
+class CompletedDocumentationListResponse(BaseModel):
+    """List of completed documentation"""
+    items: List[CompletedDocumentationItem] = Field(..., description="List of completed documentation")
+    total: int = Field(..., description="Total number of items")
+
+# Search-related models
+class SearchRequest(BaseModel):
+    """Documentation search request"""
+    owner: str = Field(..., description="Repository owner")
+    repo: str = Field(..., description="Repository name")
+    query: str = Field(..., description="Search query")
+    limit: Optional[int] = Field(5, description="Maximum number of results")
+    content_type: Optional[str] = Field(None, description="Filter by content type")
+
+class SearchResult(BaseModel):
+    """Search result item"""
+    id: str = Field(..., description="Document ID")
+    file_path: str = Field(..., description="File path")
+    title: str = Field(..., description="Document title")
+    content_preview: str = Field(..., description="Content preview")
+    content_type: str = Field(..., description="Content type")
+    relevance_score: float = Field(..., description="Relevance score")
+
+class SearchResponse(BaseModel):
+    """Search response"""
+    status: str = Field(..., description="Response status")
+    query: str = Field(..., description="Search query")
+    repository: str = Field(..., description="Repository identifier")
+    total_results: int = Field(..., description="Total number of results")
+    results: List[SearchResult] = Field(..., description="Search results")
+
+class DocumentContentRequest(BaseModel):
+    """Document content request"""
+    owner: str = Field(..., description="Repository owner")
+    repo: str = Field(..., description="Repository name")
+    doc_id: str = Field(..., description="Document ID")
+
+class DocumentContentResponse(BaseModel):
+    """Document content response"""
+    status: str = Field(..., description="Response status")
+    doc_id: str = Field(..., description="Document ID")
+    repository: str = Field(..., description="Repository identifier")
+    content: Optional[str] = Field(None, description="Document content")
+
 # Add the chat_completions_stream endpoint to the main app
 app.add_api_route("/chat/completions/stream", chat_completions_stream, methods=["POST"])
 app.add_api_route("/chat/completions/stream/v2", chat_completions_stream_v2, methods=["POST"])
@@ -165,20 +235,48 @@ job_store: Dict[str, JobStatus] = {}
 # Thread pool for running background tasks
 executor = ThreadPoolExecutor(max_workers=5)
 
-def generate_request_id(repo_url: str, title: str) -> str:
+def generate_request_id_legacy(repo_url: str, title: str) -> str:
     """
-    Generate a deterministic request ID based on repo URL and title
-    
+    Generate a deterministic request ID based on repo URL and title (legacy method)
+
     Args:
         repo_url: Repository URL
         title: Page title
-        
+
     Returns:
         A unique request ID
     """
     # Create a hash of the repo URL and title
     hash_input = f"{repo_url}:{title}".encode('utf-8')
     return hashlib.md5(hash_input).hexdigest()
+
+def generate_request_id(repo_url: str, title: str = None) -> str:
+    """
+    Generate a deterministic request ID based on repository owner/repo
+
+    Args:
+        repo_url: Repository URL
+        title: Page title (ignored, kept for compatibility)
+
+    Returns:
+        A unique request ID based on owner/repo SHA1 hash
+    """
+    import re
+    import hashlib
+
+    # Extract owner and repo from URL
+    url_match = re.search(r"(?:github\.com|gitlab\.com|bitbucket\.org)/([^/]+)/([^/]+)", repo_url)
+    if not url_match:
+        # Fallback to old method if URL parsing fails
+        return generate_request_id_legacy(repo_url, title or "")
+
+    owner, repo = url_match.groups()
+    # Remove .git suffix if present
+    repo = repo.replace('.git', '')
+
+    # Create SHA1 hash of owner/repo
+    repo_identifier = f"{owner}/{repo}"
+    return hashlib.sha1(repo_identifier.encode('utf-8')).hexdigest()
 
 def get_job_status(request_id: str) -> Optional[JobStatus]:
     """
@@ -872,27 +970,414 @@ async def get_documentation_detail(
         repo_url=job.get("repo_url")
     )
 
+@app.delete("/api/v2/documentation/delete/{request_id}")
+async def delete_documentation_task_endpoint(
+    request_id: str = Path(..., description="Request ID")
+) -> DocumentationDeleteResponse:
+    """
+    Delete a documentation generation task and its associated files
+
+    Args:
+        request_id: Request ID of the task to delete
+
+    Returns:
+        Deletion status response
+    """
+    try:
+        # Check if task exists
+        task_info = get_documentation_task(request_id)
+        if not task_info:
+            raise HTTPException(status_code=404, detail=f"Documentation task {request_id} not found")
+
+        # Stop the task if it's running
+        if request_id in documentation_jobs:
+            job = documentation_jobs[request_id]
+            if hasattr(job, 'status') and job.status in ["pending", "running"]:
+                # Mark job as cancelled
+                job.status = "cancelled"
+                job.error = "Task cancelled by user"
+                logger.info(f"Cancelled running documentation job {request_id}")
+
+        # Delete from database
+        success = delete_documentation_task(request_id)
+
+        if success:
+            # Remove from in-memory job store
+            if request_id in documentation_jobs:
+                del documentation_jobs[request_id]
+
+            # Try to delete generated files
+            try:
+                # Get the output directory for this task
+                repo_url = task_info.get("repo_url", "")
+                if repo_url:
+                    owner, repo = extract_repo_info(repo_url)
+                    output_dir = os.path.expanduser(f"~/.deepwiki/documentation/{task_info.get('title', 'unknown')}_{request_id}")
+
+                    if os.path.exists(output_dir):
+                        import shutil
+                        shutil.rmtree(output_dir)
+                        logger.info(f"Deleted documentation files at {output_dir}")
+            except Exception as file_error:
+                logger.warning(f"Could not delete files for task {request_id}: {str(file_error)}")
+
+            return DocumentationDeleteResponse(
+                request_id=request_id,
+                success=True,
+                message=f"Documentation task {request_id} has been successfully deleted"
+            )
+        else:
+            return DocumentationDeleteResponse(
+                request_id=request_id,
+                success=False,
+                message=f"Failed to delete documentation task {request_id} from database"
+            )
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error deleting documentation task {request_id}: {str(e)}")
+        return DocumentationDeleteResponse(
+            request_id=request_id,
+            success=False,
+            message=f"Error deleting documentation task: {str(e)}"
+        )
+
+@app.post("/api/v2/documentation/reset/{request_id}")
+async def reset_documentation_task_endpoint(
+    request_id: str = Path(..., description="Request ID")
+) -> DocumentationResetResponse:
+    """
+    Reset a documentation generation task to pending status
+
+    This is useful when a task gets stuck or needs to be restarted.
+
+    Args:
+        request_id: Request ID of the task to reset
+
+    Returns:
+        Reset status response
+    """
+    try:
+        # Check if task exists
+        task_info = get_documentation_task(request_id)
+        if not task_info:
+            raise HTTPException(status_code=404, detail=f"Documentation task {request_id} not found")
+
+        # Stop the current job if it's running
+        if request_id in documentation_jobs:
+            job = documentation_jobs[request_id]
+            if hasattr(job, 'status') and job.status in ["pending", "running"]:
+                # Mark job as cancelled
+                job.status = "cancelled"
+                job.error = "Task reset by user"
+                logger.info(f"Cancelled running documentation job {request_id} for reset")
+
+            # Remove from in-memory job store
+            del documentation_jobs[request_id]
+
+        # Update task status in database to pending
+        from api.database import update_documentation_task_status
+        success = update_documentation_task_status(request_id, "pending", None, None)
+
+        if success:
+            # Clear all stage completion status
+            from api.database import reset_documentation_stages
+            reset_documentation_stages(request_id)
+
+            # Restart the documentation generation
+            agent = DocumentationAgent()
+            repo_url = task_info.get("repo_url", "")
+            title = task_info.get("title", "")
+
+            if repo_url and title:
+                # Create new job
+                job = DocumentationJob(
+                    request_id=request_id,
+                    repo_url=repo_url,
+                    title=title,
+                    status="pending"
+                )
+                documentation_jobs[request_id] = job
+
+                # Start generation in background
+                asyncio.create_task(agent.generate_documentation(repo_url, title, request_id))
+
+                return DocumentationResetResponse(
+                    request_id=request_id,
+                    success=True,
+                    message=f"Documentation task {request_id} has been reset and restarted"
+                )
+            else:
+                return DocumentationResetResponse(
+                    request_id=request_id,
+                    success=False,
+                    message=f"Cannot restart task {request_id}: missing repo_url or title"
+                )
+        else:
+            return DocumentationResetResponse(
+                request_id=request_id,
+                success=False,
+                message=f"Failed to reset documentation task {request_id} in database"
+            )
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error resetting documentation task {request_id}: {str(e)}")
+        return DocumentationResetResponse(
+            request_id=request_id,
+            success=False,
+            message=f"Error resetting documentation task: {str(e)}"
+        )
+
+@app.get("/api/v2/documentation/completed")
+async def get_completed_documentation_list(
+    limit: int = Query(20, description="Maximum number of items to return"),
+    offset: int = Query(0, description="Number of items to skip")
+) -> CompletedDocumentationListResponse:
+    """
+    Get list of completed documentation tasks
+
+    Args:
+        limit: Maximum number of items to return (default: 20)
+        offset: Number of items to skip for pagination (default: 0)
+
+    Returns:
+        List of completed documentation tasks
+    """
+    logger.info(f"Getting completed documentation list with limit={limit}, offset={offset}")
+    try:
+        from api.database import get_completed_documentation_tasks
+
+        # Get completed tasks from database
+        tasks = get_completed_documentation_tasks(limit=limit, offset=offset)
+
+        items = []
+        for task in tasks:
+            # Extract owner and repo from repo_url
+            repo_url = task.get('repo_url', '')
+            owner, repo = '', ''
+
+            if repo_url:
+                if 'github.com' in repo_url:
+                    parts = repo_url.replace('https://github.com/', '').split('/')
+                    if len(parts) >= 2:
+                        owner, repo = parts[0], parts[1]
+                elif 'gitlab.com' in repo_url:
+                    parts = repo_url.replace('https://gitlab.com/', '').split('/')
+                    if len(parts) >= 2:
+                        owner, repo = parts[0], parts[1]
+                elif 'bitbucket.org' in repo_url:
+                    parts = repo_url.replace('https://bitbucket.org/', '').split('/')
+                    if len(parts) >= 2:
+                        owner, repo = parts[0], parts[1]
+
+            # Create description from title if not available
+            description = task.get('description') or f"Documentation for {owner}/{repo}"
+
+            items.append(CompletedDocumentationItem(
+                request_id=task['id'],
+                title=task['title'],
+                repo_url=repo_url,
+                owner=owner,
+                repo=repo,
+                description=description,
+                completed_at=task['completed_at'],
+                output_url=task.get('output_url')
+            ))
+
+        # Get total count for pagination
+        from api.database import get_completed_documentation_count
+        total = get_completed_documentation_count()
+
+        return CompletedDocumentationListResponse(
+            items=items,
+            total=total
+        )
+
+    except Exception as e:
+        logger.error(f"Error getting completed documentation list: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Error getting completed documentation list: {str(e)}")
+
 # 添加一个端点来获取生成的文档文件
 @app.get("/api/v2/documentation/file/{file_path:path}")
 async def get_documentation_file(file_path: str):
     """
     Get the generated documentation file
-    
+
     Args:
         file_path: Relative path to the documentation file
-        
+
     Returns:
         Documentation file content
     """
     # 构建完整文件路径
     full_path = os.path.join("output", "documentation", file_path)
-    
+
     # 检查文件是否存在
     if not os.path.exists(full_path):
         raise HTTPException(status_code=404, detail=f"Documentation file not found")
-    
+
     # 返回文件内容
     return FileResponse(full_path)
+
+# 添加一个端点来通过owner/repo获取文档信息
+@app.get("/api/v2/documentation/by-repo/{owner}/{repo}")
+async def get_documentation_by_repo(owner: str, repo: str):
+    """
+    Get documentation information by repository owner and name
+
+    Args:
+        owner: Repository owner
+        repo: Repository name
+
+    Returns:
+        Documentation information including output_path
+    """
+    # Construct repo URL (assuming GitHub for now, could be enhanced)
+    repo_url = f"https://github.com/{owner}/{repo}"
+
+    # Generate request ID based on owner/repo (new unified approach)
+    request_id = generate_request_id(repo_url)
+    task_info = get_documentation_task(request_id)
+
+    # If not found with new method, try legacy methods for backward compatibility
+    if not task_info:
+        possible_titles = [
+            f"{owner}/{repo}",
+            f"{owner}/{repo} Documentation",
+            repo,
+            f"{repo} Documentation",
+            f"{repo}"
+        ]
+
+        for title in possible_titles:
+            legacy_request_id = generate_request_id_legacy(repo_url, title)
+            task_info = get_documentation_task(legacy_request_id)
+            if task_info:
+                request_id = legacy_request_id
+                break
+
+    if not task_info:
+        raise HTTPException(status_code=404, detail=f"No documentation found for {owner}/{repo}")
+
+    if task_info["status"] != "completed":
+        raise HTTPException(
+            status_code=400,
+            detail=f"Documentation is not completed (current status: {task_info['status']})"
+        )
+
+    # Extract output_path from output_url
+    output_url = task_info.get("output_url", "")
+    if output_url.startswith("/api/v2/documentation/file/") and output_url != "/api/v2/documentation/file/index.md":
+        output_path = output_url.replace("/api/v2/documentation/file/", "").replace("/index.md", "")
+    elif output_url == "/api/v2/documentation/file/index.md" or not output_url:
+        # Handle the case where output_url is just "/api/v2/documentation/file/index.md" or empty
+        # In this case, we need to construct the output_path from the request_id
+        safe_title = "".join(c if c.isalnum() else "_" for c in task_info.get("title", ""))
+        output_path = f"{safe_title}_{request_id}"
+    else:
+        raise HTTPException(status_code=404, detail=f"Invalid output URL format: {output_url}")
+
+    return {
+        "request_id": request_id,
+        "owner": owner,
+        "repo": repo,
+        "output_path": output_path,
+        "status": task_info["status"],
+        "title": task_info.get("title", f"{owner}/{repo}"),
+        "created_at": task_info.get("created_at"),
+        "completed_at": task_info.get("completed_at")
+    }
+
+# 添加一个端点来处理legacy路径的重定向
+@app.get("/api/v2/documentation/by-legacy-path/{legacy_path}")
+async def get_documentation_by_legacy_path(legacy_path: str):
+    """
+    Get documentation information by legacy path (for redirecting old URLs)
+
+    Args:
+        legacy_path: Legacy path (e.g., deepwiki_open_dff227bb91da531e00360c2c311951ab)
+
+    Returns:
+        Documentation information including owner and repo for redirection
+    """
+    # Try to find a task with this legacy_path as part of the output_path
+    # This is a simple approach - in a production system, you might want to store this mapping
+
+    # Get all documentation tasks and find one that matches
+    from api.database import get_all_documentation_tasks
+
+    all_tasks = get_all_documentation_tasks()
+
+    for task in all_tasks:
+        if task["status"] == "completed" and task.get("output_url"):
+            # Extract output_path from output_url
+            output_url = task.get("output_url", "")
+            if output_url == "/api/v2/documentation/file/index.md":
+                # Handle the case where output_url is just "/api/v2/documentation/file/index.md"
+                safe_title = "".join(c if c.isalnum() else "_" for c in task.get("title", ""))
+                output_path = f"{safe_title}_{task['request_id']}"
+            elif output_url.startswith("/api/v2/documentation/file/"):
+                output_path = output_url.replace("/api/v2/documentation/file/", "").replace("/index.md", "")
+            else:
+                continue
+
+            # Check if this matches the legacy_path
+            if output_path == legacy_path:
+                # Extract owner and repo from repo_url
+                repo_url = task.get("repo_url", "")
+                if repo_url:
+                    import re
+                    url_match = re.search(r"github\.com/([^/]+)/([^/]+)", repo_url)
+                    if url_match:
+                        owner, repo = url_match.groups()
+                        return {
+                            "request_id": task["request_id"],
+                            "owner": owner,
+                            "repo": repo,
+                            "legacy_path": legacy_path,
+                            "status": task["status"]
+                        }
+
+    raise HTTPException(status_code=404, detail=f"No documentation found for legacy path: {legacy_path}")
+
+# 添加一个端点来从request_id获取owner和repo信息
+@app.get("/api/v2/documentation/repo-info/{request_id}")
+async def get_repo_info_by_request_id(request_id: str):
+    """
+    Get repository owner and name by request ID (for URL redirection)
+
+    Args:
+        request_id: Documentation request ID
+
+    Returns:
+        Repository owner and name information
+    """
+    # Get task info from database
+    task_info = get_documentation_task(request_id)
+
+    if not task_info:
+        raise HTTPException(status_code=404, detail=f"No documentation found for request ID: {request_id}")
+
+    # Extract owner and repo from repo_url
+    repo_url = task_info.get("repo_url", "")
+    if repo_url:
+        import re
+        url_match = re.search(r"github\.com/([^/]+)/([^/]+)", repo_url)
+        if url_match:
+            owner, repo = url_match.groups()
+            return {
+                "request_id": request_id,
+                "owner": owner,
+                "repo": repo,
+                "repo_url": repo_url,
+                "title": task_info.get("title"),
+                "status": task_info.get("status")
+            }
+
+    raise HTTPException(status_code=404, detail=f"Could not extract repository information from request ID: {request_id}")
 
 async def _process_documentation_job(request_id: str, repo_url: str, title: str):
     """
@@ -935,13 +1420,178 @@ async def get_all_documentation_tasks():
 def get_documentation_job(request_id: str) -> Optional[Dict[str, Any]]:
     """
     Get a documentation job by request ID
-    
+
     Args:
         request_id: Request ID
-        
+
     Returns:
         Documentation job or None if not found
     """
     # 从数据库获取任务
     from api.database import get_documentation_task
     return get_documentation_task(request_id)
+
+# Search API endpoints
+@app.post("/api/v2/search/documents")
+async def search_documents(request: SearchRequest) -> SearchResponse:
+    """
+    Search documentation content for a specific repository
+
+    Args:
+        request: Search request
+
+    Returns:
+        Search results
+    """
+    try:
+        search_tool = DocumentSearchTool()
+        result = search_tool.search_repository_docs(
+            owner=request.owner,
+            repo=request.repo,
+            query=request.query,
+            limit=request.limit,
+            content_type=request.content_type
+        )
+
+        if result["status"] == "success":
+            # Convert results to response format
+            search_results = [
+                SearchResult(
+                    id=item["id"],
+                    file_path=item["file_path"],
+                    title=item["title"],
+                    content_preview=item["content_preview"],
+                    content_type=item["content_type"],
+                    relevance_score=item["relevance_score"]
+                )
+                for item in result["results"]
+            ]
+
+            return SearchResponse(
+                status="success",
+                query=result["query"],
+                repository=result["repository"],
+                total_results=result["total_results"],
+                results=search_results
+            )
+        else:
+            return SearchResponse(
+                status="error",
+                query=request.query,
+                repository=f"{request.owner}/{request.repo}",
+                total_results=0,
+                results=[]
+            )
+
+    except Exception as e:
+        logger.error(f"Error searching documents: {e}")
+        return SearchResponse(
+            status="error",
+            query=request.query,
+            repository=f"{request.owner}/{request.repo}",
+            total_results=0,
+            results=[]
+        )
+
+@app.post("/api/v2/search/document/content")
+async def get_document_content(request: DocumentContentRequest) -> DocumentContentResponse:
+    """
+    Get full content of a specific document by ID
+
+    Args:
+        request: Document content request
+
+    Returns:
+        Document content
+    """
+    try:
+        search_tool = DocumentSearchTool()
+        result = search_tool.get_document_by_id(
+            owner=request.owner,
+            repo=request.repo,
+            doc_id=request.doc_id
+        )
+
+        return DocumentContentResponse(
+            status=result["status"],
+            doc_id=result["doc_id"],
+            repository=result["repository"],
+            content=result["content"]
+        )
+
+    except Exception as e:
+        logger.error(f"Error getting document content: {e}")
+        return DocumentContentResponse(
+            status="error",
+            doc_id=request.doc_id,
+            repository=f"{request.owner}/{request.repo}",
+            content=None
+        )
+
+@app.get("/api/v2/search/content-types/{owner}/{repo}")
+async def get_content_types(
+    owner: str = Path(..., description="Repository owner"),
+    repo: str = Path(..., description="Repository name"),
+    content_type: str = Query(..., description="Content type to search for"),
+    limit: int = Query(10, description="Maximum number of results")
+):
+    """
+    Search documents by content type
+
+    Args:
+        owner: Repository owner
+        repo: Repository name
+        content_type: Content type to search for
+        limit: Maximum number of results
+
+    Returns:
+        Search results filtered by content type
+    """
+    try:
+        search_tool = DocumentSearchTool()
+        result = search_tool.search_by_content_type(
+            owner=owner,
+            repo=repo,
+            content_type=content_type,
+            limit=limit
+        )
+
+        if result["status"] == "success":
+            # Convert results to response format
+            search_results = [
+                SearchResult(
+                    id=item["id"],
+                    file_path=item["file_path"],
+                    title=item["title"],
+                    content_preview=item["content_preview"],
+                    content_type=item["content_type"],
+                    relevance_score=item.get("relevance_score", 0.0)
+                )
+                for item in result["results"]
+            ]
+
+            return SearchResponse(
+                status="success",
+                query=f"content_type:{content_type}",
+                repository=f"{owner}/{repo}",
+                total_results=result["total_results"],
+                results=search_results
+            )
+        else:
+            return SearchResponse(
+                status="error",
+                query=f"content_type:{content_type}",
+                repository=f"{owner}/{repo}",
+                total_results=0,
+                results=[]
+            )
+
+    except Exception as e:
+        logger.error(f"Error searching by content type: {e}")
+        return SearchResponse(
+            status="error",
+            query=f"content_type:{content_type}",
+            repository=f"{owner}/{repo}",
+            total_results=0,
+            results=[]
+        )

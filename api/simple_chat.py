@@ -20,9 +20,12 @@ from strands_tools import http_request,  mem0_memory
 from mcp.client.streamable_http import streamablehttp_client
 from strands.tools.mcp import MCPClient
 
-from api.data_pipeline import count_tokens, get_file_content
+from api.data_pipeline import count_tokens, get_file_content, extract_repo_info
 from api.rag import RAG
 from api.config import configs
+
+# Import our search tools
+from api.search_tools import DocumentSearchTool
 
 # Configure logging
 logging.basicConfig(
@@ -215,10 +218,55 @@ async def chat_completions_stream_v2(request: ChatCompletionRequest):
                 
                 # Initialize tools list
                 tools = [http_request]
-                
+
+                # Extract repository info for LanceDB search
+                try:
+                    owner, repo_name = extract_repo_info(request.repo_url)
+                    logger.info(f"Extracted repo info: {owner}/{repo_name}")
+
+                    # Create LanceDB search tool
+                    search_tool = DocumentSearchTool()
+
+                    # Create a custom tool function for LanceDB search
+                    def lancedb_search(query: str, limit: int = 5) -> str:
+                        """Search repository documentation using LanceDB"""
+                        try:
+                            result = search_tool.search_repository_docs(
+                                owner=owner,
+                                repo=repo_name,
+                                query=query,
+                                limit=limit
+                            )
+
+                            if result["status"] == "success" and result["results"]:
+                                # Format results for the agent
+                                formatted_results = []
+                                for doc in result["results"]:
+                                    formatted_results.append(
+                                        f"**{doc['title']}** ({doc['content_type']})\n"
+                                        f"File: {doc['file_path']}\n"
+                                        f"Content: {doc['content_preview']}\n"
+                                        f"Relevance: {doc['relevance_score']:.2f}\n"
+                                    )
+
+                                return f"Found {len(result['results'])} relevant documents:\n\n" + "\n---\n".join(formatted_results)
+                            else:
+                                return f"No documentation found for query: {query}"
+
+                        except Exception as e:
+                            logger.error(f"LanceDB search error: {e}")
+                            return f"Error searching documentation: {str(e)}"
+
+                    # Add LanceDB search tool to tools list
+                    tools.append(lancedb_search)
+                    logger.info("LanceDB search tool added to agent")
+
+                except Exception as e:
+                    logger.warning(f"Could not extract repo info or setup LanceDB search: {e}")
+
                 # Check if MCP server is provided in the request
                 mcp_server = getattr(request, 'mcp_server', None)
-                
+
                 # Add custom MCP tool if MCP server is provided
                 if mcp_server:
                     from strands_tools import mcp
@@ -238,10 +286,15 @@ async def chat_completions_stream_v2(request: ChatCompletionRequest):
                     top_p=0.8,
                     system_prompt=(
                         "You are a helpful AI assistant that provides information about code repositories. "
+                        "You have access to repository documentation through a LanceDB search tool. "
+                        "ALWAYS try to search the repository documentation first using the lancedb_search function "
+                        "before falling back to other tools like GitHub search. "
+                        "When a user asks about the repository, use lancedb_search to find relevant documentation. "
                         "Format your responses using Markdown syntax for better readability. "
                         "Use code blocks with language specifiers, headings, lists, and other Markdown "
                         "features to structure your response. For code examples, always use ```language "
-                        "syntax. For important information, use **bold** or *italic* formatting."
+                        "syntax. For important information, use **bold** or *italic* formatting. "
+                        "When referencing documentation found through search, cite the file paths and titles."
                     )
                 )
                 
@@ -261,9 +314,17 @@ async def chat_completions_stream_v2(request: ChatCompletionRequest):
                     
                     
                     
-                    # Extract previous context
-                    
-                    prompt = f"User: {query}\n\n You Need return Markdown format.\n\n Assistant: "
+                    # Extract previous context and create enhanced prompt
+                    prompt = f"""Repository: {request.repo_url}
+
+User Query: {query}
+
+Instructions:
+1. First, search the repository documentation using lancedb_search to find relevant information
+2. If no relevant documentation is found, you may use other available tools
+3. Provide a comprehensive answer based on the documentation found
+4. Format your response in Markdown
+5. Include references to the documentation sources when applicable"""
                     
                     # Log the prompt in debug mode
                     if DEBUG_MODE:

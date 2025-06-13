@@ -21,9 +21,12 @@ from strands_tools import http_request, mem0_memory
 
 # Import database functions
 from api.database import (
-    save_documentation_task, get_documentation_task, 
+    save_documentation_task, get_documentation_task,
     save_documentation_stage, get_all_documentation_tasks
 )
+
+# Import LanceDB manager
+from api.lancedb_manager import LanceDBManager
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -143,6 +146,24 @@ def worker_thread():
                 )
                 
                 if output_path:
+                    # Store generated documentation in LanceDB
+                    try:
+                        from api.data_pipeline import extract_repo_info
+                        owner, repo_name = extract_repo_info(repo_url)
+
+                        # Get the directory containing the generated files
+                        doc_dir = os.path.dirname(output_path)
+
+                        # Initialize LanceDB manager and store files
+                        lancedb_manager = LanceDBManager()
+                        storage_result = lancedb_manager.store_markdown_files(owner, repo_name, doc_dir)
+
+                        logger.info(f"LanceDB storage result for {task_id}: {storage_result}")
+
+                    except Exception as lancedb_error:
+                        logger.error(f"Error storing documentation in LanceDB for {task_id}: {lancedb_error}")
+                        # Don't fail the task if LanceDB storage fails
+
                     # 更新任务状态为完成
                     save_documentation_task(
                         task_id=task_id,
@@ -197,6 +218,7 @@ class StageResult:
     stage: str
     content: str
     completed_at: str
+    execution_time: float = 0.0
 
 @dataclass
 class DocumentationJob:
@@ -248,16 +270,16 @@ class DocumentationAgent:
             "quality_check"
         ]
     
-    async def process_stage(self, 
-                           repo_url: str, 
-                           stage: str, 
+    async def process_stage(self,
+                           repo_url: str,
+                           stage: str,
                            task_id: str,
                            previous_results: Dict[str, StageResult] = None,
                            file_tree: str = None,
                            readme: str = None) -> StageResult:
         """
         Process a specific stage of documentation generation
-        
+
         Args:
             repo_url: Repository URL
             stage: Stage name
@@ -265,15 +287,18 @@ class DocumentationAgent:
             previous_results: Results from previous stages
             file_tree: Repository file tree (only used in code_analysis stage)
             readme: Repository README content
-        
+
         Returns:
             Stage result
         """
+        import time
+        start_time = time.time()
+
         logger.info(f"Processing stage: {stage} for repo: {repo_url}")
-        
+
         # 初始化 previous_results 如果为 None
         previous_results = previous_results or {}
-        
+
         # 更新阶段状态为进行中
         save_documentation_stage(
             task_id=task_id,
@@ -323,12 +348,17 @@ class DocumentationAgent:
                     content=f"Stage {stage} result: {response}",
                     user_id=self.conversation_id
                 )
-                
+
+                # Calculate execution time
+                end_time = time.time()
+                execution_time = end_time - start_time
+
                 # Return the result
                 return StageResult(
                     stage=stage,
                     content=str(response),
-                    completed_at=datetime.now().isoformat()
+                    completed_at=datetime.now().isoformat(),
+                    execution_time=execution_time
                 )
         except Exception as e:
             logger.error(f"Error processing stage {stage}: {str(e)}")
@@ -556,23 +586,82 @@ Please perform a detailed **code analysis** of the provided repository, focusing
 
 **Output Requirements:**
 1.  **Repository Purpose:** Clearly state the primary goal and overarching functionality of this repository.
-2.  **Key Components & Relationships:** Identify the main modules, services, or logical units within the codebase. Describe their individual responsibilities and how they interact with each other.
-3.  **Important Files & Directories:** List and briefly explain the significance of critical files (e.g., `main` entry points, configuration files, core logic files) and directories (e.g., `src`, `api`, `tests`, `docs`). Prioritize files and directories that are essential for understanding the project's architecture and operation.
-4.  **Programming Languages & Frameworks:** List all primary programming languages, frameworks, and significant libraries used.
-5.  **Architecture & Design Patterns:** Describe any discernible architectural patterns (e.g., MVC, Microservices, Event-Driven) or design principles (e.g., SOLID, DRY) implemented.
-6.  **Dependencies & External Integrations:** Identify and explain any external services, APIs, or third-party dependencies the project relies on.
-7.  **Documentation Prioritization:** Based on your analysis, suggest the **most important parts of the codebase that absolutely require detailed documentation**. This will guide the planning stage.""",
+
+2.  **Project Structure Analysis:** **CRITICAL** - Carefully analyze the project structure to identify:
+    - **Frontend Components:** Look for directories like `frontend/`, `client/`, `web/`, `ui/`, `src/app/`, `src/components/`, `src/pages/`, `public/`, `static/`
+    - **Backend Components:** Look for directories like `backend/`, `server/`, `api/`, `services/`, `src/api/`, `src/server/`
+    - **Technology Indicators:**
+      - Frontend: `package.json` with React/Next.js/Vue/Angular, `src/components/`, `pages/`, `app/`, `.tsx/.jsx` files
+      - Backend: `requirements.txt`, `Cargo.toml`, `pom.xml`, `go.mod`, API endpoints, database configs
+    - **Monorepo vs Separate Repos:** Determine if this is a monorepo with multiple applications or a single-purpose repository
+    - **Full-stack Frameworks:** Identify if using frameworks like Next.js, Nuxt.js, SvelteKit that handle both frontend and backend
+
+3.  **Key Components & Relationships:** Identify the main modules, services, or logical units within the codebase. **Specifically distinguish between:**
+    - **Frontend Components:** UI components, pages, routing, state management, styling systems
+    - **Backend Components:** API endpoints, data models, business logic, database interactions, authentication
+    - **Shared Components:** Utilities, types, configurations used by both frontend and backend
+    - **Integration Points:** How frontend and backend communicate (REST APIs, GraphQL, WebSockets, etc.)
+
+4.  **Important Files & Directories:** List and briefly explain the significance of critical files and directories. **Categorize by:**
+    - **Frontend Files:** Component files, page files, routing configs, styling files, build configs
+    - **Backend Files:** API route files, model files, middleware, database configs, server entry points
+    - **Configuration Files:** Environment configs, build tools, deployment configs
+    - **Documentation & Tests:** README files, test directories, documentation folders
+
+5.  **Programming Languages & Frameworks:** List all primary programming languages, frameworks, and significant libraries used. **Separate by:**
+    - **Frontend Technologies:** React, Next.js, Vue, Angular, TypeScript, CSS frameworks, state management libraries
+    - **Backend Technologies:** Python (FastAPI/Django/Flask), Node.js (Express), Java (Spring), Go, Rust, databases
+    - **DevOps & Tools:** Docker, CI/CD, testing frameworks, build tools
+
+6.  **Architecture & Design Patterns:** Describe architectural patterns, **specifically noting:**
+    - **Frontend Patterns:** Component architecture, state management patterns, routing strategies
+    - **Backend Patterns:** API design patterns (REST/GraphQL), data access patterns, authentication strategies
+    - **Overall Architecture:** Microservices, monolithic, serverless, JAMstack, etc.
+
+7.  **Dependencies & External Integrations:** Identify external services, APIs, or third-party dependencies, **categorized by:**
+    - **Frontend Dependencies:** UI libraries, utility libraries, external APIs called from client
+    - **Backend Dependencies:** Database systems, external APIs, authentication services, cloud services
+    - **Development Dependencies:** Build tools, testing frameworks, linting tools
+
+8.  **Documentation Prioritization:** Based on your analysis, suggest the **most important parts that require detailed documentation**, **prioritizing:**
+    - **Frontend Architecture** (if significant frontend components detected)
+    - **Backend Architecture** (if significant backend components detected)
+    - **API Documentation** (if backend APIs detected)
+    - **Integration Patterns** (if both frontend and backend detected)
+    - **Core Features** and **Setup/Configuration**
+
+**IMPORTANT:** Your analysis should clearly indicate whether this is a frontend-only, backend-only, or full-stack project, as this will determine the documentation structure in the planning stage.""",
             "planning": """
 Based on the code analysis, please create a comprehensive and detailed documentation plan in XML format.
 
-IMPORTANT: Your documentation plan should be thorough and cover all major aspects of the repository. Use the following structure as inspiration, but adapt and expand it based on the specific repository you're analyzing:
+IMPORTANT: Your documentation plan should be thorough and cover all major aspects of the repository.
 
-RECOMMENDED DOCUMENTATION STRUCTURE:
+**SPECIAL INSTRUCTIONS FOR PROJECT STRUCTURE ANALYSIS:**
+
+1. **FRONTEND/BACKEND DETECTION**: Carefully analyze the file tree to identify if the project has separate frontend and backend components:
+   - Look for directories like: `frontend/`, `backend/`, `client/`, `server/`, `api/`, `web/`, `app/`, `ui/`, `src/app/`, `src/components/`, `src/pages/`
+   - Look for framework indicators: `package.json` (Node.js/React/Next.js), `requirements.txt` (Python), `Cargo.toml` (Rust), `pom.xml` (Java), etc.
+   - Look for technology stack indicators: React, Next.js, Vue, Angular (frontend) vs FastAPI, Django, Flask, Express (backend)
+
+2. **ARCHITECTURE CHAPTER STRUCTURE**: If you detect separate frontend and backend components, create dedicated chapters:
+   - **Chapter 2: Frontend Architecture** - Dedicated to frontend technologies, components, UI/UX, state management, routing
+   - **Chapter 3: Backend Architecture** - Dedicated to backend services, APIs, data processing, server components, databases
+   - **Chapter 4: System Integration** - How frontend and backend communicate, API contracts, data flow
+
+3. **SINGLE-STACK PROJECTS**: If it's a single technology stack (e.g., pure frontend, pure backend, or monolithic), adapt accordingly:
+   - **Full-stack frameworks** (like Next.js with API routes): Create sections for both frontend and backend aspects within the same architecture chapter
+   - **Pure frontend/backend**: Focus on the relevant architecture only
+
+RECOMMENDED DOCUMENTATION STRUCTURE (adapt based on project structure):
 - Overview (project introduction, purpose, key features)
 - System Architecture (high-level design, component relationships)
-  - Frontend Architecture (UI framework, state management, routing)
-  - Backend Architecture (API design, data flow, server components)
-  - Data Processing Pipeline (data handling, transformations, storage)
+  - **IF SEPARATE FRONTEND/BACKEND DETECTED:**
+    - Frontend Architecture (UI framework, components, state management, routing, styling)
+    - Backend Architecture (API design, data flow, server components, databases, authentication)
+    - System Integration (API contracts, data flow, communication patterns)
+  - **IF SINGLE STACK:**
+    - Application Architecture (framework-specific structure, key components, data flow)
+    - Technical Stack (technologies used, architectural patterns)
 - Core Features (detailed explanation of main functionalities)
   - Feature 1 (e.g., Wiki Generation, Document Analysis)
   - Feature 2 (e.g., Interactive Q&A, Search)
@@ -581,7 +670,7 @@ RECOMMENDED DOCUMENTATION STRUCTURE:
   - Key Algorithms and Processes
   - Integration Points
   - Performance Considerations
-- API Reference (endpoints, parameters, responses)
+- API Reference (endpoints, parameters, responses) - **Include if backend APIs detected**
 - Configuration & Setup (installation, environment setup)
 - Development Guide (contribution guidelines, testing)
 - Advanced Usage (customization, extensions)
@@ -854,24 +943,24 @@ Provide a summary of your quality check and any final improvements that should b
                     # 处理阶段
                     logger.info(f"Starting stage {stage} for task {request_id}")
                     result = await self.process_stage(
-                        repo_url=repo_url, 
-                        stage=stage, 
+                        repo_url=repo_url,
+                        stage=stage,
                         task_id=request_id,
                         previous_results=results,
                         file_tree=file_tree,
                         readme=readme
                     )
-                    
+
                     # 存储结果
                     results[stage] = result
-                    
+
                     # 更新阶段状态
                     save_documentation_stage(
                         task_id=request_id,
                         name=stage,
                         description=f"Completed {stage.replace('_', ' ')}",
                         completed=True,
-                        execution_time=1.0  # 示例执行时间
+                        execution_time=result.execution_time
                     )
                     
                     logger.info(f"Completed stage {stage} for task {request_id}")
@@ -1058,14 +1147,14 @@ Provide a summary of your quality check and any final improvements that should b
                             generated_content = content_result.content
                             if generated_content:
                                 chapter_content = generated_content
-    
+
                             # 更新阶段状态
                             save_documentation_stage(
                                 task_id=request_id,
                                 name=f"content_generation_{chapter_id}",
                                 description=f"Completed content generation for '{chapter_title}'",
                                 completed=True,
-                                execution_time=1.0  # 示例执行时间
+                                execution_time=content_result.execution_time
                             )
     
                             logger.info(f"Completed content generation for chapter {chapter_id}")
@@ -1134,17 +1223,17 @@ Provide a summary of your quality check and any final improvements that should b
                 file_tree=file_tree,
                 readme=readme
             )
-            
+
             # 存储优化结果
             results["optimization"] = optimization_result
-            
+
             # 更新阶段状态
             save_documentation_stage(
                 task_id=request_id,
                 name="optimization",
                 description="Completed optimization",
                 completed=True,
-                execution_time=1.0  # 示例执行时间
+                execution_time=optimization_result.execution_time
             )
             
             logger.info(f"Completed optimization stage for task {request_id}")
@@ -1170,17 +1259,17 @@ Provide a summary of your quality check and any final improvements that should b
                 file_tree=file_tree,
                 readme=readme
             )
-            
+
             # 存储质量检查结果
             results["quality_check"] = quality_check_result
-            
+
             # 更新阶段状态
             save_documentation_stage(
                 task_id=request_id,
                 name="quality_check",
                 description="Completed quality check",
                 completed=True,
-                execution_time=1.0  # 示例执行时间
+                execution_time=quality_check_result.execution_time
             )
             
             logger.info(f"Completed quality check stage for task {request_id}")
@@ -1534,22 +1623,34 @@ An error occurred during the documentation generation process:
             return None
 
 # Helper functions
-def generate_request_id(repo_url: str, title: str) -> str:
+def generate_request_id(repo_url: str, title: str = None) -> str:
     """
-    Generate a deterministic request ID based on repository URL and title
-    
+    Generate a deterministic request ID based on repository owner/repo
+
     Args:
         repo_url: Repository URL
-        title: Documentation title
-        
+        title: Documentation title (ignored, kept for compatibility)
+
     Returns:
-        Request ID
+        Request ID based on owner/repo SHA1 hash
     """
+    import re
     import hashlib
-    
-    # Create a deterministic ID based on repo URL and title
-    hash_input = f"{repo_url}:{title}"
-    return hashlib.md5(hash_input.encode()).hexdigest()
+
+    # Extract owner and repo from URL
+    url_match = re.search(r"(?:github\.com|gitlab\.com|bitbucket\.org)/([^/]+)/([^/]+)", repo_url)
+    if not url_match:
+        # Fallback to old method if URL parsing fails
+        hash_input = f"{repo_url}:{title or ''}"
+        return hashlib.md5(hash_input.encode()).hexdigest()
+
+    owner, repo = url_match.groups()
+    # Remove .git suffix if present
+    repo = repo.replace('.git', '')
+
+    # Create SHA1 hash of owner/repo
+    repo_identifier = f"{owner}/{repo}"
+    return hashlib.sha1(repo_identifier.encode('utf-8')).hexdigest()
 
 def get_documentation_job(request_id: str) -> Optional[DocumentationJob]:
     """

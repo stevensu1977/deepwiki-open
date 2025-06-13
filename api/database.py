@@ -599,3 +599,161 @@ def delete_documentation_task(task_id: str) -> bool:
         return False
     finally:
         conn.close()
+
+def update_documentation_task_status(task_id: str, status: str, completed_at: str = None, error: str = None) -> bool:
+    """
+    Update documentation task status in database
+
+    Args:
+        task_id: Task ID
+        status: New status
+        completed_at: Completion timestamp (optional)
+        error: Error message (optional)
+
+    Returns:
+        True if successful, False otherwise
+    """
+    conn = get_connection()
+    try:
+        cursor = conn.cursor()
+
+        # Update task status
+        if completed_at and error:
+            cursor.execute(
+                "UPDATE documentation_tasks SET status = ?, completed_at = ?, error = ? WHERE id = ?",
+                (status, completed_at, error, task_id)
+            )
+        elif completed_at:
+            cursor.execute(
+                "UPDATE documentation_tasks SET status = ?, completed_at = ? WHERE id = ?",
+                (status, completed_at, task_id)
+            )
+        elif error:
+            cursor.execute(
+                "UPDATE documentation_tasks SET status = ?, error = ? WHERE id = ?",
+                (status, error, task_id)
+            )
+        else:
+            cursor.execute(
+                "UPDATE documentation_tasks SET status = ?, completed_at = NULL, error = NULL WHERE id = ?",
+                (status, task_id)
+            )
+
+        conn.commit()
+        logger.info(f"Updated documentation task {task_id} status to {status}")
+        return True
+
+    except Exception as e:
+        conn.rollback()
+        logger.error(f"Error updating documentation task status: {str(e)}")
+        return False
+    finally:
+        conn.close()
+
+def reset_documentation_stages(task_id: str) -> bool:
+    """
+    Reset all documentation stages for a task to incomplete
+
+    Args:
+        task_id: Task ID
+
+    Returns:
+        True if successful, False otherwise
+    """
+    conn = get_connection()
+    try:
+        cursor = conn.cursor()
+
+        # Reset all stages to incomplete
+        cursor.execute(
+            "UPDATE documentation_stages SET completed = 0, execution_time = NULL WHERE task_id = ?",
+            (task_id,)
+        )
+
+        conn.commit()
+        logger.info(f"Reset all stages for documentation task {task_id}")
+        return True
+
+    except Exception as e:
+        conn.rollback()
+        logger.error(f"Error resetting documentation stages: {str(e)}")
+        return False
+    finally:
+        conn.close()
+
+def get_completed_documentation_tasks(limit: int = 20, offset: int = 0) -> List[Dict[str, Any]]:
+    """
+    Get list of completed documentation tasks
+
+    Args:
+        limit: Maximum number of tasks to return
+        offset: Number of tasks to skip for pagination
+
+    Returns:
+        List of completed documentation tasks
+    """
+    conn = get_connection()
+    cursor = conn.cursor()
+
+    try:
+        # Get completed tasks ordered by completion time (newest first)
+        cursor.execute(
+            """SELECT id, repo_url, title, status, created_at, completed_at, output_url
+               FROM documentation_tasks
+               WHERE status = 'completed'
+               ORDER BY completed_at DESC
+               LIMIT ? OFFSET ?""",
+            (limit, offset)
+        )
+
+        rows = cursor.fetchall()
+
+        tasks = []
+        for row in rows:
+            task = {
+                'id': row[0],
+                'repo_url': row[1],
+                'title': row[2],
+                'status': row[3],
+                'created_at': row[4],
+                'completed_at': row[5],
+                'output_url': row[6]
+            }
+
+            # Add output URL if not already set
+            if not task['output_url']:
+                task['output_url'] = f"/wiki/{task['id']}"
+
+            tasks.append(task)
+
+        return tasks
+
+    except Exception as e:
+        logger.error(f"Error getting completed documentation tasks: {str(e)}")
+        return []
+    finally:
+        conn.close()
+
+def get_completed_documentation_count() -> int:
+    """
+    Get total count of completed documentation tasks
+
+    Returns:
+        Total number of completed tasks
+    """
+    conn = get_connection()
+    cursor = conn.cursor()
+
+    try:
+        cursor.execute(
+            "SELECT COUNT(*) FROM documentation_tasks WHERE status = 'completed'"
+        )
+
+        count = cursor.fetchone()[0]
+        return count
+
+    except Exception as e:
+        logger.error(f"Error getting completed documentation count: {str(e)}")
+        return 0
+    finally:
+        conn.close()
