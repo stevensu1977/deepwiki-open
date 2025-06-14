@@ -3,7 +3,7 @@
 import React, { useState, useEffect } from 'react';
 import { useParams } from 'next/navigation';
 import Link from 'next/link';
-import { FaHome, FaArrowLeft, FaSun, FaMoon, FaComments } from 'react-icons/fa';
+import { FaHome, FaSun, FaMoon, FaComments } from 'react-icons/fa';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import rehypeRaw from 'rehype-raw';
@@ -237,11 +237,11 @@ export default function WikiPage() {
       // Handle Mermaid diagrams
       if (!inline && match && match[1] === 'mermaid') {
         return (
-          <div className="my-4 bg-gray-50 dark:bg-gray-800 rounded-md overflow-hidden">
+          <div className="my-4 bg-gray-50 dark:bg-gray-800 rounded-md overflow-hidden h-[500px]">
             <Mermaid
               chart={codeContent}
               className="w-full max-w-full"
-              zoomingEnabled={true}
+              zoomingEnabled={false}
             />
           </div>
         );

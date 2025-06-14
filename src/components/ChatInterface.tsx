@@ -25,7 +25,7 @@ const components = {
           <Mermaid
             chart={codeContent}
             className="w-full max-w-full"
-            zoomingEnabled={true}
+            zoomingEnabled={false}
           />
         </div>
       );

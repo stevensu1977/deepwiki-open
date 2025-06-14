@@ -14,9 +14,9 @@ mermaid.initialize({
   flowchart: {
     htmlLabels: true,
     curve: 'basis',
-    nodeSpacing: 50,
-    rankSpacing: 50,
-    padding: 15,
+    nodeSpacing: 60,
+    rankSpacing: 60,
+    padding: 20,
   },
   themeCSS: `
     /* General styles for all diagrams */
@@ -157,7 +157,7 @@ mermaid.initialize({
     }
   `,
   fontFamily: 'system-ui, -apple-system, sans-serif',
-  fontSize: 12,
+  fontSize: 14,
 });
 
 interface MermaidProps {
@@ -173,7 +173,7 @@ const FullScreenModal: React.FC<{
   children: React.ReactNode;
 }> = ({ isOpen, onClose, children }) => {
   const modalRef = useRef<HTMLDivElement>(null);
-  const [zoom, setZoom] = useState(1);
+  const [zoom, setZoom] = useState(2);
 
   // Close on Escape key
   useEffect(() => {
@@ -212,26 +212,26 @@ const FullScreenModal: React.FC<{
   // Reset zoom when modal opens
   useEffect(() => {
     if (isOpen) {
-      setZoom(1);
+      setZoom(2);
     }
   }, [isOpen]);
 
   if (!isOpen) return null;
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black bg-opacity-75 p-4">
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black bg-opacity-75 p-1">
       <div
         ref={modalRef}
-        className="bg-white dark:bg-gray-800 rounded-lg shadow-2xl max-w-5xl max-h-[90vh] w-full overflow-hidden flex flex-col"
+        className="bg-white dark:bg-gray-800 rounded-lg shadow-2xl max-w-[95vw] h-[600px] w-full overflow-hidden flex flex-col"
       >
         {/* Modal header with controls */}
-        <div className="flex items-center justify-between p-4 border-b border-gray-200 dark:border-gray-700">
-          <div className="font-medium text-gray-700 dark:text-gray-300">Diagram View</div>
+        <div className="flex items-center justify-between px-3 py-1 border-b border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-900 flex-shrink-0">
+          <div className="text-sm font-medium text-gray-700 dark:text-gray-300">Diagram View</div>
           <div className="flex items-center gap-4">
-            <div className="flex items-center gap-2">
+            <div className="flex items-center gap-1">
               <button
-                onClick={() => setZoom(Math.max(0.5, zoom - 0.1))}
-                className="text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 p-2 rounded"
+                onClick={() => setZoom(Math.max(1, zoom - 0.2))}
+                className="text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 p-1 rounded"
                 aria-label="Zoom out"
               >
                 <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
@@ -240,10 +240,10 @@ const FullScreenModal: React.FC<{
                   <line x1="8" y1="11" x2="14" y2="11"></line>
                 </svg>
               </button>
-              <span className="text-sm text-gray-600 dark:text-gray-400">{Math.round(zoom * 100)}%</span>
+              <span className="text-xs text-gray-600 dark:text-gray-400 min-w-[3rem] text-center">{Math.round((zoom / 2) * 100)}%</span>
               <button
-                onClick={() => setZoom(Math.min(2, zoom + 0.1))}
-                className="text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 p-2 rounded"
+                onClick={() => setZoom(Math.min(4, zoom + 0.2))}
+                className="text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 p-1 rounded"
                 aria-label="Zoom in"
               >
                 <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
@@ -254,8 +254,8 @@ const FullScreenModal: React.FC<{
                 </svg>
               </button>
               <button
-                onClick={() => setZoom(1)}
-                className="text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 p-2 rounded"
+                onClick={() => setZoom(2)}
+                className="text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 p-1 rounded"
                 aria-label="Reset zoom"
               >
                 <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
@@ -266,7 +266,7 @@ const FullScreenModal: React.FC<{
             </div>
             <button
               onClick={onClose}
-              className="text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 p-2 rounded"
+              className="text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 p-1 rounded"
               aria-label="Close"
             >
               <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
@@ -278,7 +278,7 @@ const FullScreenModal: React.FC<{
         </div>
 
         {/* Modal content with zoom */}
-        <div className="overflow-auto p-4 flex-1 flex items-center justify-center">
+        <div className="overflow-auto p-1 flex-1 flex items-center justify-center bg-gray-50 dark:bg-gray-900 min-h-0">
           <div
             style={{
               transform: `scale(${zoom})`,
@@ -366,6 +366,12 @@ const Mermaid: React.FC<MermaidProps> = ({ chart, className = '', zoomingEnabled
           processedSvg = processedSvg.replace('<svg ', '<svg data-theme="dark" ');
         }
 
+        // Make the SVG larger by default
+        processedSvg = processedSvg.replace(
+          /<svg([^>]*)>/,
+          '<svg$1 style="transform: scale(2.5); transform-origin: center; width: 100%; height: auto;">'
+        );
+
         setSvg(processedSvg);
 
         // Call mermaid.contentLoaded to ensure proper initialization
@@ -447,14 +453,14 @@ const Mermaid: React.FC<MermaidProps> = ({ chart, className = '', zoomingEnabled
           />
 
           {!zoomingEnabled && (
-            <div className="absolute top-2 right-2 bg-gray-700/70 dark:bg-gray-900/70 text-white p-1.5 rounded-md opacity-0 group-hover:opacity-100 transition-opacity duration-200 flex items-center gap-1.5 text-xs shadow-md pointer-events-none">
-              <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+            <div className="absolute top-2 right-2 bg-blue-600/90 dark:bg-blue-700/90 text-white p-2 rounded-md opacity-0 group-hover:opacity-100 transition-opacity duration-200 flex items-center gap-2 text-sm shadow-lg pointer-events-none">
+              <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                 <circle cx="11" cy="11" r="8"></circle>
                 <line x1="21" y1="21" x2="16.65" y2="16.65"></line>
                 <line x1="11" y1="8" x2="11" y2="14"></line>
                 <line x1="8" y1="11" x2="14" y2="11"></line>
               </svg>
-              <span>Click to zoom</span>
+              <span>Click to view fullscreen</span>
             </div>
           )}
         </div>
