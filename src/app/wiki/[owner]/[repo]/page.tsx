@@ -237,11 +237,11 @@ export default function WikiPage() {
       // Handle Mermaid diagrams
       if (!inline && match && match[1] === 'mermaid') {
         return (
-          <div className="my-4 bg-gray-50 dark:bg-gray-800 rounded-md overflow-hidden h-[500px]">
+          <div className="my-6 bg-gray-50 dark:bg-gray-800 rounded-lg overflow-hidden min-h-[600px] p-4">
             <Mermaid
               chart={codeContent}
-              className="w-full max-w-full"
-              zoomingEnabled={false}
+              className="w-full h-full"
+              zoomingEnabled={true}
             />
           </div>
         );

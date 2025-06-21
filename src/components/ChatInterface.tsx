@@ -1,32 +1,64 @@
 'use client';
 
-import React, { useState, useRef, useEffect } from 'react';
-import { FaChevronLeft, FaSearch, FaCode, FaToggleOn, FaToggleOff, FaMoon, FaSun, FaCog } from 'react-icons/fa';
+import React, { useState, useRef, useEffect, useCallback, useMemo } from 'react';
+import { FaChevronLeft, FaChevronRight, FaSearch, FaCode, FaToggleOn, FaToggleOff, FaMoon, FaSun, FaCog,FaHome,FaBars } from 'react-icons/fa';
 import { MdSend } from 'react-icons/md';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import rehypeRaw from 'rehype-raw';
 import { Prism as SyntaxHighlighter } from 'react-syntax-highlighter';
 import { vscDarkPlus } from 'react-syntax-highlighter/dist/esm/styles/prism';
-import Mermaid from './Mermaid';
+
 import MCPSettings from './MCPSettings';
 import { getChatUrls } from '../config/api';
+import router from 'next/router';
 
 // 在组件外部定义 Markdown 渲染组件
 const components = {
-  code({ node, inline, className, children, ...props }) {
+  code({ inline, className, children, ...props }) {
     const match = /language-(\w+)/.exec(className || '');
     const codeContent = children ? String(children).replace(/\n$/, '') : '';
     
-    // 处理 Mermaid 图表
+    // 处理 Mermaid 图表 - 显示为代码块
     if (!inline && match && match[1] === 'mermaid') {
       return (
-        <div className="my-4 bg-gray-50 dark:bg-gray-800 rounded-md overflow-hidden">
-          <Mermaid
-            chart={codeContent}
-            className="w-full max-w-full"
-            zoomingEnabled={false}
-          />
+        <div className="my-4 rounded-md overflow-hidden">
+          <div className="bg-gray-800 px-4 py-2 text-xs text-gray-400 flex justify-between items-center">
+            <span>mermaid</span>
+            <button
+              onClick={() => {
+                navigator.clipboard.writeText(codeContent);
+              }}
+              className="text-gray-400 hover:text-white"
+              title="Copy code"
+            >
+              <svg
+                xmlns="http://www.w3.org/2000/svg"
+                className="h-4 w-4"
+                fill="none"
+                viewBox="0 0 24 24"
+                stroke="currentColor"
+              >
+                <path
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  strokeWidth={2}
+                  d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z"
+                />
+              </svg>
+            </button>
+          </div>
+          <SyntaxHighlighter
+            language="mermaid"
+            style={vscDarkPlus}
+            className="!text-xs"
+            customStyle={{ margin: 0, borderRadius: '0 0 0.375rem 0.375rem' }}
+            showLineNumbers={true}
+            wrapLines={true}
+            wrapLongLines={true}
+          >
+            {codeContent}
+          </SyntaxHighlighter>
         </div>
       );
     }
@@ -200,6 +232,17 @@ interface CodeFile {
   path: string;
   content: string;
   language: string;
+  size?: number;
+  sha?: string;
+  isHighlighted?: boolean;
+}
+
+interface FileTreeData {
+  status: string;
+  repository: string;
+  metadata: Record<string, string>;
+  files: string[];
+  total_files: number;
 }
 
 interface Message {
@@ -207,10 +250,10 @@ interface Message {
   content: string;
 }
 
-const ChatInterface: React.FC<ChatInterfaceProps> = ({ 
-  repoOwner, 
-  repoName, 
-  onBack, 
+const ChatInterface: React.FC<ChatInterfaceProps> = ({
+  repoOwner,
+  repoName,
+  onBack,
   isDarkMode = false,
   onToggleDarkMode = () => {}
 }) => {
@@ -222,6 +265,11 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({
   const [searchQuery, setSearchQuery] = useState('');
   const [showSettings, setShowSettings] = useState(false);
   const [activeMcpServer, setActiveMcpServer] = useState<MCPServer | null>(null);
+  const [fileTree, setFileTree] = useState<string[]>([]);
+  const [highlightedFiles, setHighlightedFiles] = useState<string[]>([]);
+  const [isLoadingFileTree, setIsLoadingFileTree] = useState(true);
+  const [codeBrowserMode, setCodeBrowserMode] = useState<'full' | 'minimal'>('full');
+
   
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
@@ -271,7 +319,86 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({
       document.removeEventListener('mousedown', handleClickOutside);
     };
   }, [showSettings]);
-  
+
+  // Load file tree on component mount
+  useEffect(() => {
+    const loadFileTree = async () => {
+      try {
+        setIsLoadingFileTree(true);
+        const url = `${getChatUrls().base}/api/v2/documentation/file-tree/${repoOwner}/${repoName}`;
+        const response = await fetch(url);
+
+        if (response.ok) {
+          const data: FileTreeData = await response.json();
+          setFileTree(data.files);
+        } else {
+          console.warn('File tree not found, status:', response.status);
+          setFileTree([]);
+        }
+      } catch (error) {
+        console.error('Error loading file tree:', error);
+        setFileTree([]);
+      } finally {
+        setIsLoadingFileTree(false);
+      }
+    };
+
+    loadFileTree();
+  }, [repoOwner, repoName]);
+
+  // Extract mentioned files from AI messages
+  const extractMentionedFiles = useCallback((content: string): string[] => {
+    if (!fileTree.length) return [];
+
+    const mentionedFiles: string[] = [];
+
+    // Multiple patterns to detect file paths
+    const patterns = [
+      // Pattern 1: Standard file paths with extensions
+      /(?:^|\s|`|'|")((?:[a-zA-Z0-9_\-.]+\/)*[a-zA-Z0-9_\-.]+\.(js|ts|tsx|jsx|py|md|json|yml|yaml|txt|go|rs|java|cpp|c|h|php|rb|swift|kt|scala|sh|sql|css|scss|sass|html|xml|dockerfile|gitignore|env))/g,
+
+      // Pattern 2: Files in code blocks or inline code
+      /```[\s\S]*?```|`([^`]+\.(js|ts|tsx|jsx|py|md|json|yml|yaml|txt|go|rs|java|cpp|c|h|php|rb|swift|kt|scala|sh|sql|css|scss|sass|html|xml|dockerfile|gitignore|env))`/g,
+
+      // Pattern 3: Explicit file mentions (e.g., "the file api/__init__.py")
+      /(?:file|path|script|component|module)\s+([a-zA-Z0-9_\-./]+\.(js|ts|tsx|jsx|py|md|json|yml|yaml|txt|go|rs|java|cpp|c|h|php|rb|swift|kt|scala|sh|sql|css|scss|sass|html|xml|dockerfile|gitignore|env))/gi
+    ];
+
+    patterns.forEach(pattern => {
+      let match;
+      while ((match = pattern.exec(content)) !== null) {
+        const filePath = match[1] || match[0];
+
+        // Clean up the file path
+        const cleanPath = filePath
+          .replace(/^[`'"]+|[`'"]+$/g, '') // Remove quotes and backticks
+          .replace(/^.*?([a-zA-Z0-9_\-./]+\.[a-zA-Z0-9]+).*$/, '$1') // Extract just the file path
+          .trim();
+
+        // Verify the file exists in our file tree
+        if (cleanPath && fileTree.includes(cleanPath)) {
+          mentionedFiles.push(cleanPath);
+        }
+      }
+    });
+
+    return [...new Set(mentionedFiles)]; // Remove duplicates
+  }, [fileTree]);
+
+  // Update highlighted files when messages change
+  useEffect(() => {
+    if (messages.length > 0 && fileTree.length > 0) {
+      const lastAssistantMessage = messages
+        .filter(msg => msg.role === 'assistant')
+        .pop();
+
+      if (lastAssistantMessage) {
+        const mentioned = extractMentionedFiles(lastAssistantMessage.content);
+        setHighlightedFiles(mentioned);
+      }
+    }
+  }, [messages, extractMentionedFiles]);
+
   const handleSendMessage = async () => {
     if (!inputValue.trim() || isLoading) return;
     
@@ -377,99 +504,180 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({
     }
   };
   
-  // Mock code files for demonstration
-  const mockFiles: CodeFile[] = [
-    {
-      path: 'api/rag.py',
-      content: `RAG_TEMPLATE = r"""<START_OF_SYS_PROMPT>
-{{system_prompt}}
-{{output_format_str}}
-<END_OF_SYS_PROMPT>
-{# OrderedDict of DialogTurn #}
-{% if conversation_history %}
-<START_OF_CONVERSATION_HISTORY>
-{% for key, dialog_turn in conversation_history.items() %}
-{{key}}.
-User: {{dialog_turn.user_query.query_str}}
-You: {{dialog_turn.assistant_response.response_str}}
-{% endfor %}
-<END_OF_CONVERSATION_HISTORY>
-{% endif %}
-{% if contexts %}
-<START_OF_CONTEXT>
-{% for context in contexts %}
-{{loop.index }}.
-File Path: {{context.meta_data.get('file_path', 'unknown')}}
-Content: {{context.text}}
-{% endfor %}
-<END_OF_CONTEXT>
-{% endif %}
-<START_OF_USER_PROMPT>
-{{input_str}}
-<END_OF_USER_PROMPT>
-"""`,
-      language: 'python'
-    },
-    {
-      path: 'src/components/Ask.tsx',
-      content: `import React, { useState } from 'react';
-import { FaArrowRight } from 'react-icons/fa';
-import Markdown from './Markdown';
+  // Get language from file extension
+  const getLanguageFromExtension = (filePath: string): string => {
+    const extension = filePath.split('.').pop()?.toLowerCase();
 
-interface AskProps {
-  repoUrl: string;
-}
+    const languageMap: Record<string, string> = {
+      // JavaScript/TypeScript
+      'js': 'javascript',
+      'jsx': 'jsx',
+      'ts': 'typescript',
+      'tsx': 'tsx',
+      'mjs': 'javascript',
+      'cjs': 'javascript',
 
-const Ask: React.FC<AskProps> = ({ repoUrl }) => {
-  const [question, setQuestion] = useState('');
-  const [response, setResponse] = useState('');
-  const [isLoading, setIsLoading] = useState(false);
+      // Python
+      'py': 'python',
+      'pyw': 'python',
+      'pyi': 'python',
 
-  const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!question.trim() || isLoading) return;
-    
-    setIsLoading(true);
-    // Mock API call
-    setTimeout(() => {
-      setResponse("This is a mock response to your question about " + repoUrl);
-      setIsLoading(false);
-    }, 1500);
+      // Web
+      'html': 'html',
+      'htm': 'html',
+      'css': 'css',
+      'scss': 'scss',
+      'sass': 'sass',
+      'less': 'less',
+
+      // Config/Data
+      'json': 'json',
+      'xml': 'xml',
+      'yaml': 'yaml',
+      'yml': 'yaml',
+      'toml': 'toml',
+      'ini': 'ini',
+      'env': 'bash',
+
+      // Shell/Scripts
+      'sh': 'bash',
+      'bash': 'bash',
+      'zsh': 'bash',
+      'fish': 'bash',
+      'ps1': 'powershell',
+      'bat': 'batch',
+      'cmd': 'batch',
+
+      // Programming Languages
+      'java': 'java',
+      'c': 'c',
+      'cpp': 'cpp',
+      'cxx': 'cpp',
+      'cc': 'cpp',
+      'h': 'c',
+      'hpp': 'cpp',
+      'cs': 'csharp',
+      'php': 'php',
+      'rb': 'ruby',
+      'go': 'go',
+      'rs': 'rust',
+      'swift': 'swift',
+      'kt': 'kotlin',
+      'scala': 'scala',
+      'r': 'r',
+      'R': 'r',
+      'sql': 'sql',
+      'pl': 'perl',
+      'lua': 'lua',
+      'dart': 'dart',
+
+      // Markup/Documentation
+      'md': 'markdown',
+      'markdown': 'markdown',
+      'tex': 'latex',
+      'rst': 'rst',
+
+      // Docker/Infrastructure
+      'dockerfile': 'dockerfile',
+      'dockerignore': 'ignore',
+      'gitignore': 'ignore',
+
+      // Other
+      'txt': 'text',
+      'log': 'text',
+      'csv': 'csv'
+    };
+
+    return languageMap[extension || ''] || 'text';
+  };
+
+  // Load file content when a file is selected
+  const loadFileContent = async (filePath: string): Promise<CodeFile | null> => {
+    try {
+      const response = await fetch(`${getChatUrls().base}/api/v2/repository/file/${repoOwner}/${repoName}/${filePath}`);
+
+      if (response.ok) {
+        const data = await response.json();
+        return {
+          path: filePath,
+          content: data.content,
+          language: getLanguageFromExtension(filePath), // Use our language detection
+          size: data.size,
+          sha: data.sha,
+          isHighlighted: highlightedFiles.includes(filePath)
+        };
+      } else {
+        console.error('Failed to load file content:', response.statusText);
+        return null;
+      }
+    } catch (error) {
+      console.error('Error loading file content:', error);
+      return null;
+    }
+  };
+
+  // Handle file selection
+  const handleFileSelect = async (filePath: string) => {
+    const fileContent = await loadFileContent(filePath);
+    if (fileContent) {
+      setSelectedFile(fileContent);
+    }
+  };
+
+  // Create file list based on AI mentioned files and search query
+  const fileList = useMemo((): Array<{path: string, isHighlighted: boolean}> => {
+    // If no search query and no highlighted files, return empty list
+    if (!searchQuery && highlightedFiles.length === 0) {
+      return [];
+    }
+
+    let filesToShow: string[] = [];
+
+    if (searchQuery) {
+      // If there's a search query, filter all files
+      filesToShow = fileTree.filter(filePath =>
+        filePath.toLowerCase().includes(searchQuery.toLowerCase())
+      );
+    } else {
+      // If no search query, only show highlighted (AI mentioned) files
+      filesToShow = highlightedFiles;
+    }
+
+    // Create file list with highlight information
+    return filesToShow
+      .map(path => ({
+        path,
+        isHighlighted: highlightedFiles.includes(path)
+      }))
+      .sort((a, b) => {
+        // Always sort highlighted files first
+        if (a.isHighlighted && !b.isHighlighted) return -1;
+        if (!a.isHighlighted && b.isHighlighted) return 1;
+        return a.path.localeCompare(b.path);
+      });
+  }, [searchQuery, highlightedFiles, fileTree]);
+
+  // Calculate dynamic widths based on code browser mode
+  const getChatWidth = () => {
+    switch (codeBrowserMode) {
+      case 'minimal': return 'w-3/4';
+      case 'full':
+      default: return 'w-1/2';
+    }
+  };
+
+  const getCodeBrowserWidth = () => {
+    switch (codeBrowserMode) {
+      case 'minimal': return 'w-1/4';
+      case 'full':
+      default: return 'w-1/2';
+    }
   };
 
   return (
-    <div className="w-full">
-      <form onSubmit={handleSubmit}>
-        <input
-          type="text"
-          value={question}
-          onChange={(e) => setQuestion(e.target.value)}
-          placeholder="Ask about this repository..."
-          className="w-full p-3 rounded-md"
-        />
-        <button type="submit" disabled={isLoading}>
-          <FaArrowRight />
-        </button>
-      </form>
-      {response && <Markdown content={response} />}
-    </div>
-  );
-};
-
-export default Ask;`,
-      language: 'typescript'
-    }
-  ];
-  
-  const filteredFiles = mockFiles.filter(file => 
-    file.path.toLowerCase().includes(searchQuery.toLowerCase()) ||
-    file.content.toLowerCase().includes(searchQuery.toLowerCase())
-  );
-  
-  return (
     <div className={`flex h-screen ${isDarkMode ? 'bg-gray-900 text-gray-100' : 'bg-white text-gray-800'}`}>
       {/* Left side - Chat interface */}
-      <div className="w-1/2 flex flex-col">
+      <div className={`${getChatWidth()} flex flex-col transition-all duration-300 ease-in-out`}>
         {/* Header with back button and repo info */}
         <div className="flex items-center p-4 border-b border-gray-200 dark:border-gray-700">
           <button 
@@ -486,6 +694,21 @@ export default Ask;`,
               Chat with your repository
             </p>
           </div>
+          <button 
+            onClick={() => window.location.href = '/'}
+            className={`p-2 rounded-md mr-2 ${isDarkMode ? 'hover:bg-gray-700' : 'hover:bg-gray-100'}`}
+            title="Home"
+          >
+            <FaHome />
+          </button>
+          <button 
+            onClick={() => window.location.href = `/wiki/${repoOwner}/${repoName}`}
+            className={`p-2 rounded-md mr-2 ${isDarkMode ? 'hover:bg-gray-700' : 'hover:bg-gray-100'}`}
+            title="Home"
+          >
+            <FaBars />
+          </button>
+          
           <button 
             onClick={() => setShowSettings(true)}
             className={`p-2 rounded-md mr-2 ${isDarkMode ? 'hover:bg-gray-700' : 'hover:bg-gray-100'}`}
@@ -592,72 +815,195 @@ export default Ask;`,
       </div>
       
       {/* Right sidebar - Code browser */}
-      <div className={`w-1/2 border-l ${isDarkMode ? 'border-gray-700 bg-gray-800' : 'border-gray-200'}`}>
+      <div className={`${getCodeBrowserWidth()} border-l transition-all duration-300 ease-in-out ${
+        isDarkMode ? 'border-gray-700 bg-gray-800' : 'border-gray-200'
+      } ${codeBrowserMode === 'minimal' ? 'overflow-hidden' : ''}`}>
         <div className="flex items-center p-4 border-b border-gray-200 dark:border-gray-700">
           <div className="flex-1">
-            <h2 className="text-lg font-semibold">
-              Code Browser
+            <h2 className={`font-semibold ${codeBrowserMode === 'minimal' ? 'text-sm' : 'text-lg'}`}>
+              {codeBrowserMode === 'minimal' ? 'Code' : 'Code Browser'}
             </h2>
-            <p className="text-sm text-gray-500 dark:text-gray-400">
-              Searched across {repoOwner}/{repoName}
-            </p>
+            {codeBrowserMode === 'full' && (
+              <p className="text-sm text-gray-500 dark:text-gray-400">
+                {highlightedFiles.length > 0
+                  ? `AI mentioned ${highlightedFiles.length} file${highlightedFiles.length > 1 ? 's' : ''}`
+                  : `Repository: ${repoOwner}/${repoName}`
+                }
+              </p>
+            )}
           </div>
+          {/* Toggle button for manual control */}
+          <button
+            onClick={() => {
+              if (codeBrowserMode === 'full') {
+                setCodeBrowserMode('minimal');
+              } else {
+                // From minimal, always go back to full
+                setCodeBrowserMode('full');
+              }
+            }}
+            className={`p-1 rounded-md ${isDarkMode ? 'hover:bg-gray-700' : 'hover:bg-gray-100'}`}
+            title={
+              codeBrowserMode === 'full'
+                ? 'Minimize code browser'
+                : 'Expand code browser'
+            }
+          >
+            {codeBrowserMode === 'full' ? (
+              <FaChevronRight size={12} />
+            ) : (
+              <FaChevronLeft size={12} />
+            )}
+          </button>
         </div>
-        
-        {/* Search bar */}
-        <div className="p-4 border-b border-gray-200 dark:border-gray-700">
-          <div className={`flex items-center px-3 py-2 rounded-md ${isDarkMode ? 'bg-gray-700' : 'bg-gray-100'}`}>
-            <FaSearch className="text-gray-500 dark:text-gray-400 mr-2" />
-            <input
-              type="text"
-              placeholder="Search files..."
-              value={searchQuery}
-              onChange={(e) => setSearchQuery(e.target.value)}
-              className={`w-full bg-transparent focus:outline-none ${isDarkMode ? 'text-white' : 'text-gray-800'}`}
-            />
+
+        {/* Search bar - only show in full mode or when there's a search query */}
+        {(codeBrowserMode === 'full' || searchQuery) && (
+          <div className={`${codeBrowserMode === 'minimal' ? 'p-2' : 'p-4'} border-b border-gray-200 dark:border-gray-700`}>
+            <div className={`flex items-center ${codeBrowserMode === 'minimal' ? 'px-2 py-1' : 'px-3 py-2'} rounded-md ${isDarkMode ? 'bg-gray-700' : 'bg-gray-100'}`}>
+              <FaSearch className={`text-gray-500 dark:text-gray-400 mr-2 ${codeBrowserMode === 'minimal' ? 'text-xs' : ''}`} />
+              <input
+                type="text"
+                placeholder={codeBrowserMode === 'minimal' ? 'Search...' : 'Search files...'}
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+                className={`w-full bg-transparent focus:outline-none ${isDarkMode ? 'text-white' : 'text-gray-800'} ${codeBrowserMode === 'minimal' ? 'text-xs' : ''}`}
+              />
+            </div>
           </div>
-        </div>
+        )}
         
         {/* File list or file content */}
-        <div className="h-[calc(100vh-180px)] overflow-auto">
+        <div className={`${codeBrowserMode === 'minimal' ? 'h-[calc(100vh-120px)]' : 'h-[calc(100vh-180px)]'} overflow-auto`}>
           {selectedFile ? (
-            <div className="p-4">
+            <div className={`${codeBrowserMode === 'minimal' ? 'p-2' : 'p-4'}`}>
               <div className="flex items-center mb-2">
-                <button 
+                <button
                   onClick={() => setSelectedFile(null)}
                   className={`mr-2 p-1 rounded-md ${isDarkMode ? 'hover:bg-gray-700' : 'hover:bg-gray-100'}`}
                 >
-                  <FaChevronLeft size={12} />
+                  <FaChevronLeft size={codeBrowserMode === 'minimal' ? 10 : 12} />
                 </button>
-                <span className="text-sm font-mono">{selectedFile.path}</span>
-              </div>
-              <pre className={`p-4 rounded-md overflow-auto ${isDarkMode ? 'bg-gray-900' : 'bg-gray-50'}`}>
-                <code className="font-mono text-sm whitespace-pre">
-                  {selectedFile.content.split('\n').map((line, i) => (
-                    <div key={i} className="leading-6">
-                      <span className={`inline-block w-8 text-right mr-2 ${isDarkMode ? 'text-gray-500' : 'text-gray-400'}`}>
-                        {i + 1}
+                <div className="flex-1 min-w-0">
+                  <div className="flex items-center">
+                    <span className={`font-mono ${codeBrowserMode === 'minimal' ? 'text-xs' : 'text-sm'} truncate`}>
+                      {codeBrowserMode === 'minimal' ? selectedFile.path.split('/').pop() : selectedFile.path}
+                    </span>
+                    {codeBrowserMode === 'full' && (
+                      <span className={`ml-2 px-2 py-1 text-xs rounded ${
+                        isDarkMode
+                          ? 'bg-blue-900 text-blue-200'
+                          : 'bg-blue-100 text-blue-800'
+                      }`}>
+                        {selectedFile.language.toUpperCase()}
                       </span>
-                      {line}
-                    </div>
-                  ))}
-                </code>
-              </pre>
+                    )}
+                    {selectedFile.isHighlighted && codeBrowserMode === 'full' && (
+                      <span className="ml-2 px-2 py-1 text-xs bg-purple-100 text-purple-800 dark:bg-purple-900 dark:text-purple-200 rounded">
+                        AI Mentioned
+                      </span>
+                    )}
+                  </div>
+                </div>
+              </div>
+              <div className={`${codeBrowserMode === 'minimal' ? 'text-xs' : 'text-sm'} rounded-md overflow-auto`}>
+                <SyntaxHighlighter
+                  language={selectedFile.language}
+                  style={vscDarkPlus}
+                  className={`!${codeBrowserMode === 'minimal' ? 'text-xs' : 'text-sm'}`}
+                  customStyle={{
+                    margin: 0,
+                    borderRadius: '0.375rem',
+                    fontSize: codeBrowserMode === 'minimal' ? '0.75rem' : '0.875rem',
+                    lineHeight: codeBrowserMode === 'minimal' ? '1rem' : '1.5rem'
+                  }}
+                  showLineNumbers={true}
+                  wrapLines={true}
+                  wrapLongLines={true}
+                  lineNumberStyle={{
+                    minWidth: codeBrowserMode === 'minimal' ? '1.5rem' : '2rem',
+                    paddingRight: '0.5rem',
+                    fontSize: codeBrowserMode === 'minimal' ? '0.75rem' : '0.875rem'
+                  }}
+                >
+                  {selectedFile.content}
+                </SyntaxHighlighter>
+              </div>
             </div>
           ) : (
             <div>
-              {filteredFiles.map((file, index) => (
-                <div 
-                  key={index}
-                  onClick={() => setSelectedFile(file)}
-                  className={`p-3 border-b cursor-pointer flex items-center ${
-                    isDarkMode ? 'border-gray-700 hover:bg-gray-700' : 'border-gray-100 hover:bg-gray-50'
-                  }`}
-                >
-                  <FaCode className="mr-2 text-gray-500 dark:text-gray-400" />
-                  <span className="font-mono text-sm">{file.path}</span>
+              {isLoadingFileTree ? (
+                <div className={`${codeBrowserMode === 'minimal' ? 'p-2' : 'p-4'} text-center`}>
+                  <div className={`text-gray-500 dark:text-gray-400 ${codeBrowserMode === 'minimal' ? 'text-xs' : ''}`}>
+                    {codeBrowserMode === 'minimal' ? 'Loading...' : 'Loading file tree...'}
+                  </div>
                 </div>
-              ))}
+              ) : fileList.length === 0 ? (
+                <div className={`${codeBrowserMode === 'minimal' ? 'p-4' : 'p-8'} text-center`}>
+                  <div className={`text-gray-500 dark:text-gray-400 mb-4 ${codeBrowserMode === 'minimal' ? 'text-xs' : ''}`}>
+                    {searchQuery ? (
+                      <>
+                        <FaSearch className={`mx-auto mb-2 ${codeBrowserMode === 'minimal' ? 'text-lg' : 'text-2xl'}`} />
+                        <div>{codeBrowserMode === 'minimal' ? 'No match' : 'No files match your search'}</div>
+                        {codeBrowserMode === 'full' && (
+                          <div className="text-xs mt-1">Try a different search term</div>
+                        )}
+                      </>
+                    ) : (
+                      <>
+                        <FaCode className={`mx-auto mb-2 ${codeBrowserMode === 'minimal' ? 'text-lg' : 'text-2xl'}`} />
+                        <div>{codeBrowserMode === 'minimal' ? 'No files' : 'No files mentioned yet'}</div>
+                        {codeBrowserMode === 'full' && (
+                          <div className="text-xs mt-1">Files will appear here when AI mentions them in chat</div>
+                        )}
+                      </>
+                    )}
+                  </div>
+                </div>
+              ) : (
+                <>
+                  {highlightedFiles.length > 0 && !searchQuery && codeBrowserMode === 'full' && (
+                    <div className="p-3 bg-purple-50 dark:bg-purple-900/20 border-b border-purple-200 dark:border-purple-800">
+                      <div className="text-sm font-medium text-purple-800 dark:text-purple-200">
+                        AI Mentioned Files ({highlightedFiles.length})
+                      </div>
+                    </div>
+                  )}
+                  {fileList.map((file, index) => (
+                    <div
+                      key={index}
+                      onClick={() => handleFileSelect(file.path)}
+                      className={`${codeBrowserMode === 'minimal' ? 'p-2' : 'p-3'} border-b cursor-pointer flex items-center ${
+                        file.isHighlighted
+                          ? 'bg-purple-50 dark:bg-purple-900/20 border-purple-200 dark:border-purple-800'
+                          : isDarkMode ? 'border-gray-700 hover:bg-gray-700' : 'border-gray-100 hover:bg-gray-50'
+                      }`}
+                      title={codeBrowserMode === 'minimal' ? file.path : undefined}
+                    >
+                      <FaCode className={`${codeBrowserMode === 'minimal' ? 'mr-1' : 'mr-2'} ${
+                        file.isHighlighted
+                          ? 'text-purple-600 dark:text-purple-400'
+                          : 'text-gray-500 dark:text-gray-400'
+                      } ${codeBrowserMode === 'minimal' ? 'text-xs' : ''}`} />
+                      <span className={`font-mono ${codeBrowserMode === 'minimal' ? 'text-xs' : 'text-sm'} ${
+                        file.isHighlighted
+                          ? 'text-purple-800 dark:text-purple-200'
+                          : ''
+                      } ${codeBrowserMode === 'minimal' ? 'truncate' : ''}`}>
+                        {codeBrowserMode === 'minimal' ? file.path.split('/').pop() : file.path}
+                      </span>
+                      {file.isHighlighted && codeBrowserMode === 'full' && (
+                        <span className="ml-auto px-2 py-1 text-xs bg-purple-100 text-purple-800 dark:bg-purple-800 dark:text-purple-200 rounded">
+                          AI
+                        </span>
+                      )}
+                      {file.isHighlighted && codeBrowserMode === 'minimal' && (
+                        <span className="ml-auto w-2 h-2 bg-purple-500 rounded-full"></span>
+                      )}
+                    </div>
+                  ))}
+                </>
+              )}
             </div>
           )}
         </div>

@@ -40,5 +40,6 @@ export const getDocumentationUrls = () => ({
 });
 
 export const getChatUrls = () => ({
+  base: API_CONFIG.CHAT_BASE_URL,
   completionsStreamV2: buildChatUrl(API_CONFIG.ENDPOINTS.CHAT.COMPLETIONS_STREAM_V2),
 });
