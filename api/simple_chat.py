@@ -17,8 +17,9 @@ from strands.models import BedrockModel
 from strands_tools import http_request,  mem0_memory
 
 
-from mcp.client.streamable_http import streamablehttp_client
-from strands.tools.mcp import MCPClient
+# MCP imports - only imported when needed
+# from mcp.client.streamable_http import streamablehttp_client
+# from strands.tools.mcp import MCPClient
 
 from api.data_pipeline import count_tokens, get_file_content, extract_repo_info
 from api.rag import RAG
@@ -205,61 +206,78 @@ async def chat_completions_stream_v2(request: ChatCompletionRequest):
         if DEBUG_MODE:
             logger.debug(f"User query: {query}")
 
-        # Initialize MCP client
-        github_search_client = MCPClient(
-            lambda: streamablehttp_client("https://fux8ccy7cg.execute-api.us-east-1.amazonaws.com/dev/mcp")
-        )
-        
         # Create a streaming response
         async def generate():
             try:
                 # Generate a unique user ID based on repo URL
                 user_id = hashlib.md5(request.repo_url.encode()).hexdigest()
-                
+
                 # Initialize tools list
                 tools = [http_request]
 
-                # Extract repository info for LanceDB search
+                # Initialize MCP client as None by default
+                github_search_client = None
+
+                # Extract repository info for enhanced RAG LanceDB search
                 try:
                     owner, repo_name = extract_repo_info(request.repo_url)
                     logger.info(f"Extracted repo info: {owner}/{repo_name}")
 
-                    # Create LanceDB search tool
-                    search_tool = DocumentSearchTool()
+                    # Use the new RAG LanceDB manager
+                    from api.rag_lancedb import rag_manager
 
-                    # Create a custom tool function for LanceDB search
+                    # Check if repository has LanceDB table
+                    status = rag_manager.get_repository_status(owner, repo_name)
+
+                    if status["table_exists"] and status.get("document_count", 0) > 0:
+                        logger.info(f"Using enhanced RAG LanceDB for {owner}/{repo_name} with {status['document_count']} documents")
+                        rag_available = True
+                    else:
+                        logger.warning(f"RAG LanceDB not available for {owner}/{repo_name}. Table exists: {status['table_exists']}")
+                        rag_available = False
+
+                    # Create enhanced RAG search tool using strands tool decorator
+                    from strands.tools import tool
+
+                    @tool
                     def lancedb_search(query: str, limit: int = 5) -> str:
-                        """Search repository documentation using LanceDB"""
+                        """Search repository documentation using enhanced RAG LanceDB with hybrid search"""
                         try:
-                            result = search_tool.search_repository_docs(
-                                owner=owner,
-                                repo=repo_name,
-                                query=query,
-                                limit=limit
-                            )
+                            print(f"Searching for '{query}' in {owner}/{repo_name} using enhanced RAG")
 
-                            if result["status"] == "success" and result["results"]:
-                                # Format results for the agent
-                                formatted_results = []
-                                for doc in result["results"]:
-                                    formatted_results.append(
-                                        f"**{doc['title']}** ({doc['content_type']})\n"
-                                        f"File: {doc['file_path']}\n"
-                                        f"Content: {doc['content_preview']}\n"
-                                        f"Relevance: {doc['relevance_score']:.2f}\n"
-                                    )
+                            if rag_available:
+                                # Use the new enhanced RAG search
+                                result = rag_manager.search_repository(
+                                    owner=owner,
+                                    repo=repo_name,
+                                    query=query,
+                                    limit=limit
+                                )
 
-                                return f"Found {len(result['results'])} relevant documents:\n\n" + "\n---\n".join(formatted_results)
+                                if result["status"] == "success" and result["results"]:
+                                    # Format results for the agent
+                                    formatted_results = []
+                                    for doc in result["results"]:
+                                        formatted_results.append(
+                                            f"**{doc['title']}** ({doc['content_type']})\n"
+                                            f"File: {doc['file_path']}\n"
+                                            f"Content: {doc['content_preview']}\n"
+                                            f"Relevance Score: {doc['relevance_score']:.3f}\n"
+                                        )
+
+                                    return f"Found {len(result['results'])} relevant documents using enhanced hybrid search:\n\n" + "\n---\n".join(formatted_results)
+                                else:
+                                    return f"No documentation found for query: {query}"
                             else:
-                                return f"No documentation found for query: {query}"
+                                return f"Enhanced RAG LanceDB not available for {owner}/{repo_name}. Please create the LanceDB first."
 
                         except Exception as e:
-                            logger.error(f"LanceDB search error: {e}")
+                            logger.error(f"Enhanced RAG search error: {e}")
                             return f"Error searching documentation: {str(e)}"
 
-                    # Add LanceDB search tool to tools list
+                    # Add enhanced RAG search tool to tools list
                     tools.append(lancedb_search)
-                    logger.info("LanceDB search tool added to agent")
+                    logger.info("Enhanced RAG LanceDB search tool added to agent")
 
                 except Exception as e:
                     logger.warning(f"Could not extract repo info or setup LanceDB search: {e}")
@@ -267,16 +285,21 @@ async def chat_completions_stream_v2(request: ChatCompletionRequest):
                 # Check if MCP server is provided in the request
                 mcp_server = getattr(request, 'mcp_server', None)
 
-                # Add custom MCP tool if MCP server is provided
+                # Initialize MCP client only if MCP server is provided
                 if mcp_server:
-                    from strands_tools import mcp
-                    # Configure MCP tool with server URL and auth
-                    mcp_config = {
-                        "url": mcp_server.get("url"),
-                        "auth": mcp_server.get("auth", "")
-                    }
-                    tools.append(mcp)
-                    logger.info(f"Custom MCP server configured: {mcp_server.get('url')}")
+                    try:
+                        # Import MCP modules only when needed
+                        from mcp.client.streamable_http import streamablehttp_client
+                        from strands.tools.mcp import MCPClient
+
+                        # Initialize MCP client with user-provided server
+                        github_search_client = MCPClient(
+                            lambda: streamablehttp_client(mcp_server.get("url"))
+                        )
+                        logger.info(f"MCP server configured: {mcp_server.get('url')}")
+                    except Exception as e:
+                        logger.error(f"Failed to initialize MCP client: {e}")
+                        github_search_client = None
                 
                 # Create model instance with specific system prompt for Markdown output
                 bedrock_model = BedrockModel(
@@ -286,36 +309,43 @@ async def chat_completions_stream_v2(request: ChatCompletionRequest):
                     top_p=0.8,
                     system_prompt=(
                         "You are a helpful AI assistant that provides information about code repositories. "
-                        "You have access to repository documentation through a LanceDB search tool. "
+                        "You have access to repository documentation through an enhanced RAG LanceDB search tool "
+                        "that uses FastEmbed embeddings and hybrid search (combining vector similarity and full-text search). "
                         "ALWAYS try to search the repository documentation first using the lancedb_search function "
                         "before falling back to other tools like GitHub search. "
+                        "The enhanced search provides highly accurate results with relevance scores. "
                         "When a user asks about the repository, use lancedb_search to find relevant documentation. "
                         "Format your responses using Markdown syntax for better readability. "
                         "Use code blocks with language specifiers, headings, lists, and other Markdown "
                         "features to structure your response. For code examples, always use ```language "
                         "syntax. For important information, use **bold** or *italic* formatting. "
-                        "When referencing documentation found through search, cite the file paths and titles."
+                        "When referencing documentation found through search, cite the file paths, titles, and relevance scores."
                     )
                 )
                 
-                # Use a context manager to properly initialize and close the MCP client
-                with github_search_client:
-                    # Get tools from the GitHub search MCP server
-                    mcp_tools = github_search_client.list_tools_sync()
-                    
-                    # Add MCP tools to our tools list
-                    tools.extend(mcp_tools)
-                    
-                    # Initialize Agent with model instance and tools
-                    agent = Agent(
-                        model=bedrock_model,
-                        tools=tools
-                    )
-                    
-                    
-                    
-                    # Extract previous context and create enhanced prompt
-                    prompt = f"""Repository: {request.repo_url}
+                # If MCP client is available, use it to get additional tools
+                if github_search_client:
+                    try:
+                        # Use a context manager to properly initialize and close the MCP client
+                        with github_search_client:
+                            # Get tools from the MCP server
+                            mcp_tools = github_search_client.list_tools_sync()
+
+                            # Add MCP tools to our tools list
+                            tools.extend(mcp_tools)
+                            logger.info(f"Added {len(mcp_tools)} MCP tools to agent")
+                    except Exception as e:
+                        logger.error(f"Failed to initialize MCP tools: {e}")
+                        # Continue without MCP tools
+
+                # Initialize Agent with model instance and tools (with or without MCP tools)
+                agent = Agent(
+                    model=bedrock_model,
+                    tools=tools
+                )
+
+                # Extract previous context and create enhanced prompt
+                prompt = f"""Repository: {request.repo_url}
 
 User Query: {query}
 
@@ -325,39 +355,37 @@ Instructions:
 3. Provide a comprehensive answer based on the documentation found
 4. Format your response in Markdown
 5. Include references to the documentation sources when applicable"""
-                    
-                    # Log the prompt in debug mode
-                    if DEBUG_MODE:
-                        logger.debug(f"Prompt sent to model: {prompt}")
-                    
-                    # Since astream is not available, we'll use the synchronous call
-                    # but wrap it in a background task to avoid blocking
-                    loop = asyncio.get_event_loop()
-                    
-                    # Define a function to run the agent call in a separate thread
-                    def run_agent():
-                        return agent(prompt)
-                    
-                    # Run the agent call in a thread executor to avoid blocking
-                    response = await loop.run_in_executor(None, run_agent)
-                    
-                    # Convert response to string
-                    response_str = str(response)
-                    
-                    
-                    
-                    # Log the response in debug mode
-                    if DEBUG_MODE:
-                        logger.debug(f"Full model response: {response_str}")
-                    
-                    # Since we can't stream directly, we'll simulate streaming by
-                    # sending chunks of the response
-                    chunk_size = 10  # Characters per chunk
-                    for i in range(0, len(response_str), chunk_size):
-                        chunk = response_str[i:i+chunk_size]
-                        yield chunk
-                        # Add a small delay to simulate streaming
-                        await asyncio.sleep(0.01)
+
+                # Log the prompt in debug mode
+                if DEBUG_MODE:
+                    logger.debug(f"Prompt sent to model: {prompt}")
+
+                # Since astream is not available, we'll use the synchronous call
+                # but wrap it in a background task to avoid blocking
+                loop = asyncio.get_event_loop()
+
+                # Define a function to run the agent call in a separate thread
+                def run_agent():
+                    return agent(prompt)
+
+                # Run the agent call in a thread executor to avoid blocking
+                response = await loop.run_in_executor(None, run_agent)
+
+                # Convert response to string
+                response_str = str(response)
+
+                # Log the response in debug mode
+                if DEBUG_MODE:
+                    logger.debug(f"Full model response: {response_str}")
+
+                # Since we can't stream directly, we'll simulate streaming by
+                # sending chunks of the response
+                chunk_size = 10  # Characters per chunk
+                for i in range(0, len(response_str), chunk_size):
+                    chunk = response_str[i:i+chunk_size]
+                    yield chunk
+                    # Add a small delay to simulate streaming
+                    await asyncio.sleep(0.01)
                 
             except Exception as e:
                 error_msg = f"Error generating response: {str(e)}"

@@ -43,8 +43,19 @@ class LanceDBManager:
     
     def get_repo_db_path(self, owner: str, repo: str) -> Path:
         """Get the LanceDB path for a specific repository."""
-        repo_path = self.base_path / f"{owner}_{repo}"
-        db_path = repo_path / "lancedb"
+        # Look for existing repository directory pattern
+        base_path = Path(self.base_path)
+
+        # First try to find existing directory with pattern {owner}_{repo}*
+        pattern = f"{owner}_{repo}"
+        for dir_path in base_path.iterdir():
+            if dir_path.is_dir() and dir_path.name.startswith(pattern):
+                # Use code.lancedb in the same directory as the repository output
+                return dir_path / "code.lancedb"
+
+        # Fallback to original behavior
+        repo_path = base_path / f"{owner}_{repo}"
+        db_path = repo_path / "code.lancedb"
         return db_path
     
     def get_or_create_db(self, owner: str, repo: str):
@@ -72,8 +83,8 @@ class LanceDBManager:
             pa.field("content", pa.string()),
             pa.field("content_type", pa.string()),  # e.g., "markdown", "code", "readme"
             pa.field("file_size", pa.int64()),
-            pa.field("created_at", pa.timestamp('s')),
-            pa.field("updated_at", pa.timestamp('s')),
+            pa.field("created_at", pa.timestamp('us')),  # Use microsecond precision
+            pa.field("updated_at", pa.timestamp('us')),  # Use microsecond precision
             pa.field("metadata", pa.string()),  # JSON string for additional metadata
             # Vector field will be added when we have embeddings
         ])
@@ -81,9 +92,22 @@ class LanceDBManager:
         try:
             table = db.open_table(table_name)
             logger.info(f"Opened existing table: {table_name}")
-        except FileNotFoundError:
+        except (FileNotFoundError, ValueError):
             # Create empty table with schema
-            empty_data = pa.table([], schema=schema)
+            # Create empty arrays for each field in the schema
+            empty_arrays = []
+            for field in schema:
+                if field.type == pa.string():
+                    empty_arrays.append(pa.array([], type=pa.string()))
+                elif field.type == pa.int64():
+                    empty_arrays.append(pa.array([], type=pa.int64()))
+                elif field.type == pa.timestamp('us'):
+                    empty_arrays.append(pa.array([], type=pa.timestamp('us')))
+                else:
+                    # Default to string for unknown types
+                    empty_arrays.append(pa.array([], type=pa.string()))
+
+            empty_data = pa.table(empty_arrays, schema=schema)
             table = db.create_table(table_name, empty_data)
             logger.info(f"Created new table: {table_name}")
         
@@ -106,32 +130,46 @@ class LanceDBManager:
             return {"status": "skipped", "reason": "LanceDB not available"}
         
         try:
+            logger.info(f"Starting to store markdown files for {owner}/{repo}")
             db = self.get_or_create_db(owner, repo)
+            logger.info(f"Database created/opened for {owner}/{repo}")
+
             table = self.create_documents_table(db)
-            
+            logger.info(f"Documents table created/opened for {owner}/{repo}")
+
             output_dir = Path(output_path)
             if not output_dir.exists():
                 logger.warning(f"Output directory does not exist: {output_path}")
                 return {"status": "error", "reason": "Output directory not found"}
-            
+
             documents = []
             processed_files = 0
-            
+
             # Find all markdown files
-            for md_file in output_dir.rglob("*.md"):
+            logger.info(f"Scanning for markdown files in: {output_dir}")
+            md_files = list(output_dir.rglob("*.md"))
+            logger.info(f"Found {len(md_files)} markdown files")
+
+            for md_file in md_files:
                 try:
+                    logger.debug(f"Processing file: {md_file}")
                     content = md_file.read_text(encoding='utf-8')
                     file_stats = md_file.stat()
-                    
+
                     # Generate unique ID for the document
                     doc_id = self._generate_doc_id(owner, repo, str(md_file.relative_to(output_dir)))
-                    
+
                     # Extract title from content (first # heading or filename)
                     title = self._extract_title(content, md_file.name)
-                    
+
                     # Determine content type
                     content_type = self._determine_content_type(md_file, content)
-                    
+
+                    # Convert timestamps to proper format
+                    import datetime
+                    created_at = datetime.datetime.fromtimestamp(file_stats.st_ctime)
+                    updated_at = datetime.datetime.fromtimestamp(file_stats.st_mtime)
+
                     document = {
                         "id": doc_id,
                         "file_path": str(md_file.relative_to(output_dir)),
@@ -139,33 +177,58 @@ class LanceDBManager:
                         "content": content,
                         "content_type": content_type,
                         "file_size": file_stats.st_size,
-                        "created_at": file_stats.st_ctime,
-                        "updated_at": file_stats.st_mtime,
+                        "created_at": created_at,
+                        "updated_at": updated_at,
                         "metadata": self._create_metadata(md_file, owner, repo)
                     }
-                    
+
                     documents.append(document)
                     processed_files += 1
-                    
+
                 except Exception as e:
                     logger.error(f"Error processing file {md_file}: {e}")
                     continue
-            
+
+            logger.info(f"Processed {processed_files} files, prepared {len(documents)} documents")
+
             if documents:
-                # Convert to PyArrow table and add to LanceDB
-                data = pa.table(documents)
-                table.add(data)
-                logger.info(f"Stored {len(documents)} documents in LanceDB for {owner}/{repo}")
-            
+                try:
+                    # Convert to PyArrow table and add to LanceDB
+                    logger.info("Converting documents to PyArrow table...")
+
+                    # Convert list of dictionaries to PyArrow table with schema
+                    # Extract field names from the first document
+                    field_names = list(documents[0].keys())
+
+                    # Create arrays for each field
+                    arrays = []
+                    for field_name in field_names:
+                        values = [doc[field_name] for doc in documents]
+                        arrays.append(pa.array(values))
+
+                    # Create table with field names
+                    data = pa.table(arrays, names=field_names)
+
+                    logger.info("Adding data to LanceDB table...")
+                    table.add(data)
+                    logger.info(f"Successfully stored {len(documents)} documents in LanceDB for {owner}/{repo}")
+                except Exception as e:
+                    logger.error(f"Error adding data to LanceDB table: {e}")
+                    raise
+            else:
+                logger.warning("No documents to store")
+
             return {
                 "status": "success",
                 "processed_files": processed_files,
                 "stored_documents": len(documents),
                 "db_path": str(self.get_repo_db_path(owner, repo))
             }
-            
+
         except Exception as e:
             logger.error(f"Error storing markdown files: {e}")
+            import traceback
+            logger.error(f"Traceback: {traceback.format_exc()}")
             return {"status": "error", "reason": str(e)}
     
     def search_documents(self, owner: str, repo: str, query: str, limit: int = 10) -> List[Dict[str, Any]]:
@@ -182,26 +245,34 @@ class LanceDBManager:
             List of matching documents
         """
         if not LANCEDB_AVAILABLE:
+            print("LanceDB not available")
             return []
         
         try:
             db = self.get_or_create_db(owner, repo)
-            table = self.create_documents_table(db)
-            
+
+            # Check if documents table exists
+            try:
+                table = db.open_table("documents")
+            except FileNotFoundError:
+                logger.info(f"No documents table found for {owner}/{repo}. Database may not be initialized yet.")
+                return []
+
             # For now, use simple text search
             # TODO: Implement vector search with embeddings
             query_lower = query.lower()
-            
+
             results = []
-            for batch in table.to_batches():
-                df = batch.to_pandas()
-                
+            try:
+                # Use the correct LanceDB API to get all data
+                df = table.to_pandas()
+
                 # Simple text matching
                 mask = (
                     df['title'].str.lower().str.contains(query_lower, na=False) |
                     df['content'].str.lower().str.contains(query_lower, na=False)
                 )
-                
+
                 matching_docs = df[mask]
                 for _, doc in matching_docs.iterrows():
                     results.append({
@@ -212,11 +283,14 @@ class LanceDBManager:
                         "content_type": doc["content_type"],
                         "relevance_score": self._calculate_relevance(query_lower, doc)
                     })
-            
-            # Sort by relevance and limit results
-            results.sort(key=lambda x: x["relevance_score"], reverse=True)
-            return results[:limit]
-            
+
+                # Sort by relevance and limit results
+                results.sort(key=lambda x: x["relevance_score"], reverse=True)
+                return results[:limit]
+            except Exception as e:
+                logger.warning(f"Error reading from documents table: {e}")
+                return []
+
         except Exception as e:
             logger.error(f"Error searching documents: {e}")
             return []
@@ -230,12 +304,12 @@ class LanceDBManager:
             db = self.get_or_create_db(owner, repo)
             table = self.create_documents_table(db)
             
-            for batch in table.to_batches():
-                df = batch.to_pandas()
-                matching_doc = df[df['id'] == doc_id]
-                
-                if not matching_doc.empty:
-                    return matching_doc.iloc[0]['content']
+            # Use the correct LanceDB API to get all data
+            df = table.to_pandas()
+            matching_doc = df[df['id'] == doc_id]
+
+            if not matching_doc.empty:
+                return matching_doc.iloc[0]['content']
             
             return None
             

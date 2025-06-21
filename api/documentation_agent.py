@@ -5,6 +5,7 @@ DocumentationAgent module for advanced documentation generation
 import os
 import logging
 import asyncio
+import re
 from uuid import uuid4
 from datetime import datetime
 from typing import Dict, List, Optional, Any, Tuple
@@ -976,7 +977,62 @@ Provide a summary of your quality check and any final improvements that should b
                     )
         except Exception as e:
             logger.error(f"Error generating documentation: {str(e)}")
-            raise
+
+            # 尝试生成基本文档，即使主流程失败
+            try:
+                basic_content = f"""# {title}
+
+*Generated on: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}*
+
+## Error During Generation
+
+An error occurred during the documentation generation process:
+
+```
+{str(e)}
+```
+
+## Repository Information
+
+- Repository URL: {repo_url}
+- Request ID: {request_id}
+
+"""
+
+                # 如果有任何阶段结果，添加它们
+                if results:
+                    basic_content += "\n\n## Available Content\n\n"
+                    for stage_name, result in results.items():
+                        basic_content += f"\n### {stage_name.replace('_', ' ').title()}\n\n"
+                        basic_content += result.content + "\n\n"
+
+                # 保存基本文档
+                with open(main_output_path, "w", encoding="utf-8") as f:
+                    f.write(basic_content)
+
+                # 保存文件树结构（如果有的话）
+                if 'file_tree' in locals():
+                    self._save_file_tree(doc_dir, file_tree, repo_url, request_id)
+
+                # 更新任务状态为部分完成
+                save_documentation_task(
+                    task_id=request_id,
+                    repo_url=repo_url,
+                    title=title,
+                    status="partial",
+                    error=str(e),
+                    completed_at=datetime.now().isoformat(),
+                    output_url=f"/api/v2/documentation/file/{os.path.basename(doc_dir)}/index.md",
+                    progress=100,
+                    current_stage=None
+                )
+
+                logger.info(f"Generated basic documentation for failed task {request_id}")
+                return main_output_path
+
+            except Exception as fallback_error:
+                logger.error(f"Error generating fallback documentation: {str(fallback_error)}")
+                raise
         # 处理规划结果，生成章节文件
         if "planning" in results:
             planning_result = results["planning"].content
@@ -1179,26 +1235,38 @@ Provide a summary of your quality check and any final improvements that should b
                     # 保存目录文件
                     with open(main_output_path, "w", encoding="utf-8") as f:
                         f.write(toc_content)
-                    
+
                     logger.info(f"Created index file: {main_output_path}")
+
+                    # 保存文件树结构
+                    self._save_file_tree(doc_dir, file_tree, repo_url, request_id)
                 else:
                     logger.warning(f"Could not find documentation_plan XML tags in planning result")
                     # 如果找不到XML，使用原始的编译方法
                     final_content = self._compile_final_documentation_with_fallback(results, title, repo_url)
                     with open(main_output_path, "w", encoding="utf-8") as f:
                         f.write(final_content)
+
+                    # 保存文件树结构
+                    self._save_file_tree(doc_dir, file_tree, repo_url, request_id)
             except Exception as xml_error:
                 logger.error(f"Error parsing XML from planning stage: {str(xml_error)}")
                 # 回退到原始编译方法
                 final_content = self._compile_final_documentation_with_fallback(results, title, repo_url)
                 with open(main_output_path, "w", encoding="utf-8") as f:
                     f.write(final_content)
+
+                # 保存文件树结构
+                self._save_file_tree(doc_dir, file_tree, repo_url, request_id)
         else:
             logger.warning(f"No planning result found for task {request_id}")
             # 如果没有规划结果，使用原始的编译方法
             final_content = self._compile_final_documentation_with_fallback(results, title, repo_url)
             with open(main_output_path, "w", encoding="utf-8") as f:
                 f.write(final_content)
+
+            # 保存文件树结构
+            self._save_file_tree(doc_dir, file_tree, repo_url, request_id)
         
         # 在处理完所有章节的内容生成后，进行优化和质量检查
         try:
@@ -1278,7 +1346,10 @@ Provide a summary of your quality check and any final improvements that should b
             final_content = self._compile_final_documentation(results, title, repo_url)
             with open(main_output_path, "w", encoding="utf-8") as f:
                 f.write(final_content)
-            
+
+            # 保存文件树结构
+            self._save_file_tree(doc_dir, file_tree, repo_url, request_id)
+
             logger.info(f"Updated final documentation with optimization and quality check results")
             
         except Exception as e:
@@ -1313,59 +1384,6 @@ Provide a summary of your quality check and any final improvements that should b
 
         logger.info(f"Task {request_id} completed successfully")
         return main_output_path
-        
-        
-        try:
-            # 尝试生成基本文档，即使主流程失败
-            basic_content = f"""# {title}
-
-*Generated on: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}*
-
-## Error During Generation
-
-An error occurred during the documentation generation process:
-
-```
-{str(e)}
-```
-
-## Repository Information
-
-- Repository URL: {repo_url}
-- Request ID: {request_id}
-
-"""
-            
-            # 如果有任何阶段结果，添加它们
-            if results:
-                basic_content += "\n\n## Available Content\n\n"
-                for stage_name, result in results.items():
-                    basic_content += f"\n### {stage_name.replace('_', ' ').title()}\n\n"
-                    basic_content += result.content + "\n\n"
-            
-            # 保存基本文档
-            with open(main_output_path, "w", encoding="utf-8") as f:
-                f.write(basic_content)
-            
-            # 更新任务状态为部分完成
-            save_documentation_task(
-                task_id=request_id,
-                repo_url=repo_url,
-                title=title,
-                status="partial",
-                error=str(e),
-                completed_at=datetime.now().isoformat(),
-                output_url=f"/api/v2/documentation/file/{os.path.basename(doc_dir)}/index.md",
-                progress=100,
-                current_stage=None
-            )
-            
-            logger.info(f"Generated basic documentation for failed task {request_id}")
-            return main_output_path
-            
-        except Exception as fallback_error:
-            logger.error(f"Error generating fallback documentation: {str(fallback_error)}")
-            raise
 
     def _compile_final_documentation_with_fallback(self, results: Dict[str, StageResult], title: str = None, repo_url: str = None) -> str:
         """
@@ -1509,6 +1527,70 @@ An error occurred during the documentation generation process:
             raise ValueError("Could not fetch repository structure. Repository might not exist, be empty or private.")
         
         return file_tree_data, readme_content
+
+    def _save_file_tree(self, doc_dir: str, file_tree: str, repo_url: str, request_id: str) -> None:
+        """
+        保存文件树结构到file_tree.txt文件
+
+        Args:
+            doc_dir: 文档输出目录
+            file_tree: 文件树字符串
+            repo_url: 仓库URL
+            request_id: 请求ID
+        """
+        try:
+            # 构建file_tree.txt文件路径
+            file_tree_path = os.path.join(doc_dir, "file_tree.txt")
+
+            # 从仓库URL提取仓库信息
+            from api.data_pipeline import extract_repo_info
+            owner, repo = extract_repo_info(repo_url)
+
+            # 创建文件树内容，包含元数据
+            file_tree_content = f"""# Repository File Tree
+# Repository: {owner}/{repo}
+# URL: {repo_url}
+# Generated: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}
+# Request ID: {request_id}
+# Total Files: {len(file_tree.split('\\n')) if file_tree else 0}
+
+{file_tree}
+"""
+
+            # 保存文件树到文件
+            with open(file_tree_path, "w", encoding="utf-8") as f:
+                f.write(file_tree_content)
+
+            logger.info(f"Saved file tree to: {file_tree_path}")
+
+            # 如果启用了LanceDB，也将文件树添加到向量数据库
+            try:
+                from api.lancedb_manager import LanceDBManager
+                lancedb_manager = LanceDBManager()
+
+                # 将文件树作为文档添加到LanceDB
+                lancedb_manager.add_document(
+                    owner=owner,
+                    repo=repo,
+                    content=file_tree_content,
+                    metadata={
+                        "type": "file_tree",
+                        "file_path": "file_tree.txt",
+                        "request_id": request_id,
+                        "generated_at": datetime.now().isoformat(),
+                        "total_files": len(file_tree.split('\\n')) if file_tree else 0
+                    }
+                )
+
+                logger.info(f"Added file tree to LanceDB for {owner}/{repo}")
+
+            except Exception as lancedb_error:
+                logger.warning(f"Failed to add file tree to LanceDB: {str(lancedb_error)}")
+                # 不影响主流程，继续执行
+
+        except Exception as e:
+            logger.error(f"Error saving file tree: {str(e)}")
+            # 不抛出异常，避免影响主文档生成流程
 
     @staticmethod
     def submit_job(repo_url: str, title: str, access_token: Optional[str] = None, force: bool = False) -> str:

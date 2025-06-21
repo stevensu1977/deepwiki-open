@@ -1222,6 +1222,276 @@ async def get_documentation_file(file_path: str):
     # 返回文件内容
     return FileResponse(full_path)
 
+# 添加一个端点来获取文件树
+@app.get("/api/v2/documentation/file-tree/{owner}/{repo}")
+async def get_file_tree(owner: str, repo: str):
+    """
+    Get the file tree for a repository
+
+    First tries to get from local documentation, if not found,
+    falls back to GitHub API to generate file tree dynamically.
+
+    Args:
+        owner: Repository owner
+        repo: Repository name
+
+    Returns:
+        File tree content and metadata
+    """
+    try:
+        # 首先尝试从本地文档获取文件树
+        try:
+            # 生成请求ID来查找对应的文档目录
+            from api.documentation_agent import generate_request_id
+            request_id = generate_request_id(f"https://github.com/{owner}/{repo}")
+
+            # 查找最新的文档目录
+            output_dir = os.path.join("output", "documentation")
+            if os.path.exists(output_dir):
+                # 查找包含该request_id的目录，同时也查找owner/repo模式的目录
+                matching_dirs = []
+
+                # 规范化仓库名称（处理连字符和下划线）
+                normalized_repo = repo.replace("-", "_")
+                search_patterns = [
+                    request_id,  # 使用request_id查找
+                    f"{owner}_{repo}",  # 原始名称
+                    f"{owner}_{normalized_repo}",  # 规范化名称
+                    f"{owner}_{repo}_Documentation",  # 带Documentation后缀
+                    f"{owner}_{normalized_repo}_Documentation"  # 规范化+Documentation
+                ]
+
+                for dir_name in os.listdir(output_dir):
+                    dir_path = os.path.join(output_dir, dir_name)
+                    if os.path.isdir(dir_path):
+                        # 检查是否匹配任何模式
+                        for pattern in search_patterns:
+                            if pattern in dir_name:
+                                matching_dirs.append((dir_path, os.path.getctime(dir_path)))
+                                break
+
+                if matching_dirs:
+                    # 选择最新的目录
+                    latest_dir = max(matching_dirs, key=lambda x: x[1])[0]
+                    file_tree_path = os.path.join(latest_dir, "file_tree.txt")
+
+                    if os.path.exists(file_tree_path):
+                        # 读取文件树内容
+                        with open(file_tree_path, "r", encoding="utf-8") as f:
+                            content = f.read()
+
+                        # 解析文件树内容
+                        lines = content.split('\n')
+                        metadata = {}
+                        files = []
+
+                        # 提取元数据和文件列表
+                        in_metadata = True
+                        for line in lines:
+                            line = line.strip()
+                            if not line:
+                                continue
+
+                            if line.startswith('#'):
+                                if in_metadata:
+                                    # 解析元数据
+                                    if ':' in line:
+                                        key_value = line[1:].strip().split(':', 1)
+                                        if len(key_value) == 2:
+                                            key = key_value[0].strip().lower().replace(' ', '_')
+                                            value = key_value[1].strip()
+                                            metadata[key] = value
+                                continue
+                            else:
+                                in_metadata = False
+                                # 这是一个文件路径
+                                if line and not line.startswith('#'):
+                                    files.append(line)
+
+                        metadata["source"] = "local_documentation"
+                        return {
+                            "status": "success",
+                            "repository": f"{owner}/{repo}",
+                            "metadata": metadata,
+                            "files": files,
+                            "total_files": len(files)
+                        }
+        except Exception as e:
+            logger.info(f"Local file tree not found for {owner}/{repo}, falling back to GitHub API: {str(e)}")
+
+        # 如果本地文件树不存在，使用GitHub API生成
+        logger.info(f"Generating file tree from GitHub API for {owner}/{repo}")
+
+        import requests
+        from datetime import datetime
+
+        # 构建GitHub API URL
+        api_url = f"https://api.github.com/repos/{owner}/{repo}/git/trees/main?recursive=1"
+
+        # 设置请求头
+        headers = {
+            "Accept": "application/vnd.github.v3+json",
+            "User-Agent": "DeepWiki-FileTree-Generator"
+        }
+
+        # 尝试main分支，如果失败则尝试master分支
+        branches = ["main", "master"]
+        tree_data = None
+
+        for branch in branches:
+            try:
+                branch_api_url = f"https://api.github.com/repos/{owner}/{repo}/git/trees/{branch}?recursive=1"
+                response = requests.get(branch_api_url, headers=headers, timeout=10)
+
+                if response.status_code == 200:
+                    tree_data = response.json()
+                    logger.info(f"Successfully fetched repository structure from branch: {branch}")
+                    break
+                elif response.status_code == 404:
+                    logger.warning(f"Branch {branch} not found for {owner}/{repo}")
+                    continue
+                else:
+                    logger.warning(f"GitHub API returned {response.status_code} for branch {branch}")
+                    continue
+
+            except requests.RequestException as e:
+                logger.error(f"Error fetching from GitHub API for branch {branch}: {str(e)}")
+                continue
+
+        if not tree_data or "tree" not in tree_data:
+            raise HTTPException(
+                status_code=404,
+                detail=f"Repository {owner}/{repo} not found or inaccessible via GitHub API"
+            )
+
+        # 提取文件路径（只包含文件，不包含目录）
+        files = []
+        for item in tree_data["tree"]:
+            if item.get("type") == "blob":  # 只包含文件，不包含目录
+                files.append(item["path"])
+
+        # 按路径排序
+        files.sort()
+
+        # 生成元数据
+        metadata = {
+            "repository": f"{owner}/{repo}",
+            "url": f"https://github.com/{owner}/{repo}",
+            "generated": datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
+            "source": "github_api",
+            "total_files": str(len(files)),
+            "api_sha": tree_data.get("sha", "unknown")
+        }
+
+        logger.info(f"Generated file tree from GitHub API for {owner}/{repo} with {len(files)} files")
+
+        return {
+            "status": "success",
+            "repository": f"{owner}/{repo}",
+            "metadata": metadata,
+            "files": files,
+            "total_files": len(files)
+        }
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error getting file tree for {owner}/{repo}: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Internal server error: {str(e)}")
+
+# 添加一个端点来获取仓库文件内容
+@app.get("/api/v2/repository/file/{owner}/{repo}/{file_path:path}")
+async def get_repository_file(owner: str, repo: str, file_path: str):
+    """
+    Get the content of a specific file from a repository
+
+    Args:
+        owner: Repository owner
+        repo: Repository name
+        file_path: Path to the file within the repository
+
+    Returns:
+        File content and metadata
+    """
+    try:
+        import requests
+        import base64
+
+        # 构建GitHub API URL
+        api_url = f"https://api.github.com/repos/{owner}/{repo}/contents/{file_path}"
+
+        # 发送请求
+        response = requests.get(api_url)
+
+        if response.status_code == 404:
+            raise HTTPException(status_code=404, detail=f"File not found: {file_path}")
+        elif response.status_code != 200:
+            raise HTTPException(status_code=response.status_code, detail=f"GitHub API error: {response.status_code}")
+
+        file_data = response.json()
+
+        # 解码文件内容
+        if file_data.get("encoding") == "base64":
+            content = base64.b64decode(file_data["content"]).decode("utf-8", errors="replace")
+        else:
+            content = file_data.get("content", "")
+
+        # 确定文件语言
+        file_extension = os.path.splitext(file_path)[1].lower()
+        language_map = {
+            '.py': 'python',
+            '.js': 'javascript',
+            '.ts': 'typescript',
+            '.tsx': 'typescript',
+            '.jsx': 'javascript',
+            '.java': 'java',
+            '.cpp': 'cpp',
+            '.c': 'c',
+            '.h': 'c',
+            '.go': 'go',
+            '.rs': 'rust',
+            '.php': 'php',
+            '.rb': 'ruby',
+            '.swift': 'swift',
+            '.kt': 'kotlin',
+            '.scala': 'scala',
+            '.sh': 'bash',
+            '.yml': 'yaml',
+            '.yaml': 'yaml',
+            '.json': 'json',
+            '.xml': 'xml',
+            '.html': 'html',
+            '.css': 'css',
+            '.scss': 'scss',
+            '.sass': 'sass',
+            '.md': 'markdown',
+            '.txt': 'text',
+            '.sql': 'sql',
+            '.dockerfile': 'dockerfile',
+            '.gitignore': 'text',
+            '.env': 'text'
+        }
+
+        language = language_map.get(file_extension, 'text')
+
+        return {
+            "status": "success",
+            "repository": f"{owner}/{repo}",
+            "file_path": file_path,
+            "content": content,
+            "language": language,
+            "size": file_data.get("size", len(content)),
+            "sha": file_data.get("sha"),
+            "download_url": file_data.get("download_url"),
+            "html_url": file_data.get("html_url")
+        }
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error getting file content for {owner}/{repo}/{file_path}: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Internal server error: {str(e)}")
+
 # 添加一个端点来通过owner/repo获取文档信息
 @app.get("/api/v2/documentation/by-repo/{owner}/{repo}")
 async def get_documentation_by_repo(owner: str, repo: str):
