@@ -14,12 +14,35 @@ const initializeMermaid = async () => {
     
     mermaid.initialize({
       startOnLoad: false,
-      theme: 'dark',
+      theme: 'base',
       securityLevel: 'loose',
       suppressErrorRendering: false,
       logLevel: 'debug',
       maxTextSize: 100000,
       htmlLabels: true,
+      themeVariables: {
+        primaryColor: '#ffffff',
+        primaryTextColor: '#000000',
+        primaryBorderColor: '#333333',
+        lineColor: '#333333',
+        secondaryColor: '#ffffff',
+        tertiaryColor: '#ffffff',
+        background: '#ffffff',
+        mainBkg: '#ffffff',
+        secondBkg: '#ffffff',
+        tertiaryBkg: '#ffffff',
+        // Ensure custom node colors are respected
+        nodeBkg: '#ffffff',
+        nodeTextColor: '#000000',
+        nodeBorder: '#333333',
+        // Flowchart specific
+        cScale0: '#ff9999',
+        cScale1: '#bbbbff',
+        cScale2: '#bbffbb',
+        cScale3: '#ffbbff',
+        cScale4: '#ffbbbb',
+        cScale5: '#bbffff'
+      },
       flowchart: {
         htmlLabels: true,
         curve: 'basis',
@@ -239,11 +262,11 @@ const Mermaid: React.FC<MermaidProps> = ({ chart, className = '', zoomingEnabled
       {/* Full-screen modal */}
       {showModal && zoomingEnabled && (
         <div
-          className="fixed inset-0 bg-black bg-opacity-80 flex items-center justify-center z-50 p-1"
+          className="fixed inset-0 bg-black bg-opacity-80 flex items-center justify-center z-50 p-4"
           onClick={() => setShowModal(false)}
           onWheel={handleWheel}
         >
-          <div className="relative w-[99vw] h-[99vh] bg-white dark:bg-gray-900 rounded-lg shadow-2xl flex flex-col">
+          <div className="relative w-[95vw] h-[95vh] bg-white dark:bg-gray-900 rounded-lg shadow-2xl flex flex-col">
             {/* Header with controls */}
             <div className="sticky top-0 bg-white dark:bg-gray-900 border-b border-gray-200 dark:border-gray-700 px-4 py-2 flex justify-between items-center rounded-t-lg">
               <div className="flex items-center space-x-3">

@@ -72,6 +72,7 @@ class ChatCompletionRequest(BaseModel):
     gitlab_token: Optional[str] = Field(None, description="GitLab personal access token for private repositories")
     local_ollama: Optional[bool] = Field(False, description="Use locally run Ollama model for embedding and generation")
     bitbucket_token: Optional[str] = Field(None, description="Bitbucket personal access token for private repositories")
+    mcp_server: Optional[dict] = Field(None, description="MCP server configuration with URL")
 
 @app.post("/chat/completions/stream")
 async def chat_completions_stream(request: ChatCompletionRequest):
@@ -285,6 +286,8 @@ async def chat_completions_stream_v2(request: ChatCompletionRequest):
                 # Check if MCP server is provided in the request
                 mcp_server = getattr(request, 'mcp_server', None)
 
+                print(f"MCP server: {mcp_server}")
+
                 # Initialize MCP client only if MCP server is provided
                 if mcp_server:
                     try:
@@ -332,6 +335,7 @@ async def chat_completions_stream_v2(request: ChatCompletionRequest):
                             mcp_tools = github_search_client.list_tools_sync()
 
                             # Add MCP tools to our tools list
+                            print(mcp_tools)
                             tools.extend(mcp_tools)
                             logger.info(f"Added {len(mcp_tools)} MCP tools to agent")
                     except Exception as e:
