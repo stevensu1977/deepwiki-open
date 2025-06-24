@@ -14,10 +14,10 @@ const Markdown: React.FC<MarkdownProps> = ({ content }) => {
   // Define markdown components
   const MarkdownComponents: React.ComponentProps<typeof ReactMarkdown>['components'] = {
     p({ children, ...props }: { children?: React.ReactNode }) {
-      return <p className="mb-1 text-xs dark:text-white" {...props}>{children}</p>;
+      return <p className="mb-2 text-sm leading-relaxed dark:text-white" {...props}>{children}</p>;
     },
     h1({ children, ...props }: { children?: React.ReactNode }) {
-      return <h1 className="text-base font-bold mt-3 mb-1 dark:text-white" {...props}>{children}</h1>;
+      return <h1 className="text-xl font-bold mt-4 mb-3 dark:text-white" {...props}>{children}</h1>;
     },
     h2({ children, ...props }: { children?: React.ReactNode }) {
       // Special styling for ReAct headings
@@ -26,7 +26,7 @@ const Markdown: React.FC<MarkdownProps> = ({ content }) => {
         if (text.includes('Thought') || text.includes('Action') || text.includes('Observation') || text.includes('Answer')) {
           return (
             <h2
-              className={`text-sm font-bold mt-3 mb-2 p-1 rounded ${
+              className={`text-base font-bold mt-4 mb-2 p-2 rounded ${
                 text.includes('Thought') ? 'bg-blue-100 dark:bg-blue-900/30 text-blue-800 dark:text-blue-300' :
                 text.includes('Action') ? 'bg-green-100 dark:bg-green-900/30 text-green-800 dark:text-green-300' :
                 text.includes('Observation') ? 'bg-amber-100 dark:bg-amber-900/30 text-amber-800 dark:text-amber-300' :
@@ -40,28 +40,40 @@ const Markdown: React.FC<MarkdownProps> = ({ content }) => {
           );
         }
       }
-      return <h2 className="text-sm font-bold mt-2 mb-1 dark:text-white" {...props}>{children}</h2>;
+      return <h2 className="text-lg font-bold mt-3 mb-2 dark:text-white" {...props}>{children}</h2>;
     },
     h3({ children, ...props }: { children?: React.ReactNode }) {
-      return <h3 className="text-sm font-semibold mt-2 mb-1 dark:text-white" {...props}>{children}</h3>;
+      return <h3 className="text-base font-semibold mt-3 mb-2 dark:text-white" {...props}>{children}</h3>;
     },
     h4({ children, ...props }: { children?: React.ReactNode }) {
-      return <h4 className="text-xs font-semibold mt-2 mb-1 dark:text-white" {...props}>{children}</h4>;
+      return <h4 className="text-sm font-semibold mt-2 mb-1 dark:text-white" {...props}>{children}</h4>;
+    },
+    h5({ children, ...props }: { children?: React.ReactNode }) {
+      return <h5 className="text-sm font-medium mt-2 mb-1 dark:text-white" {...props}>{children}</h5>;
+    },
+    h6({ children, ...props }: { children?: React.ReactNode }) {
+      return <h6 className="text-xs font-medium mt-2 mb-1 dark:text-white" {...props}>{children}</h6>;
     },
     ul({ children, ...props }: { children?: React.ReactNode }) {
-      return <ul className="list-disc list-inside mb-1 text-xs dark:text-white" {...props}>{children}</ul>;
+      return <ul className="list-disc pl-6 mb-3 text-sm dark:text-white space-y-1" {...props}>{children}</ul>;
     },
     ol({ children, ...props }: { children?: React.ReactNode }) {
-      return <ol className="list-decimal list-inside mb-1 text-xs dark:text-white" {...props}>{children}</ol>;
+      return <ol className="list-decimal pl-6 mb-3 text-sm dark:text-white space-y-1" {...props}>{children}</ol>;
     },
     li({ children, ...props }: { children?: React.ReactNode }) {
-      return <li className="mb-1 text-xs dark:text-white" {...props}>{children}</li>;
+      return <li className="text-sm dark:text-white leading-relaxed" {...props}>{children}</li>;
+    },
+    strong({ children, ...props }: { children?: React.ReactNode }) {
+      return <strong className="font-bold text-gray-900 dark:text-white" {...props}>{children}</strong>;
+    },
+    em({ children, ...props }: { children?: React.ReactNode }) {
+      return <em className="italic text-gray-800 dark:text-gray-200" {...props}>{children}</em>;
     },
     a({ children, href, ...props }: { children?: React.ReactNode; href?: string }) {
       return (
         <a
           href={href}
-          className="text-purple-600 dark:text-purple-400 hover:underline"
+          className="text-blue-600 dark:text-blue-400 hover:text-blue-800 dark:hover:text-blue-300 hover:underline font-medium"
           target="_blank"
           rel="noopener noreferrer"
           {...props}
@@ -73,7 +85,7 @@ const Markdown: React.FC<MarkdownProps> = ({ content }) => {
     blockquote({ children, ...props }: { children?: React.ReactNode }) {
       return (
         <blockquote
-          className="border-l-2 border-gray-300 dark:border-gray-700 pl-2 text-gray-700 dark:text-gray-300 italic my-2"
+          className="border-l-4 border-gray-300 dark:border-gray-600 pl-4 py-2 my-3 text-gray-700 dark:text-gray-300 italic bg-gray-50 dark:bg-gray-800/50 rounded-r"
           {...props}
         >
           {children}
@@ -82,8 +94,8 @@ const Markdown: React.FC<MarkdownProps> = ({ content }) => {
     },
     table({ children, ...props }: { children?: React.ReactNode }) {
       return (
-        <div className="overflow-x-auto my-2">
-          <table className="min-w-full text-xs border-collapse" {...props}>
+        <div className="overflow-x-auto my-4 border border-gray-200 dark:border-gray-700 rounded-lg">
+          <table className="min-w-full text-sm border-collapse" {...props}>
             {children}
           </table>
         </div>
@@ -101,7 +113,7 @@ const Markdown: React.FC<MarkdownProps> = ({ content }) => {
     th({ children, ...props }: { children?: React.ReactNode }) {
       return (
         <th
-          className="px-2 py-1 text-left font-medium text-gray-700 dark:text-gray-300"
+          className="px-4 py-2 text-left font-semibold text-gray-900 dark:text-gray-100 text-sm"
           {...props}
         >
           {children}
@@ -109,7 +121,7 @@ const Markdown: React.FC<MarkdownProps> = ({ content }) => {
       );
     },
     td({ children, ...props }: { children?: React.ReactNode }) {
-      return <td className="px-2 py-1 border-t border-gray-200 dark:border-gray-700" {...props}>{children}</td>;
+      return <td className="px-4 py-2 text-gray-700 dark:text-gray-300 text-sm" {...props}>{children}</td>;
     },
     code(props: {
       inline?: boolean;
@@ -183,7 +195,7 @@ const Markdown: React.FC<MarkdownProps> = ({ content }) => {
       // Handle inline code
       return (
         <code
-          className={`${className} font-mono bg-gray-100 dark:bg-gray-800 px-1.5 py-0.5 rounded text-pink-500 dark:text-pink-400 text-xs`}
+          className={`${className} font-mono bg-gray-100 dark:bg-gray-800 px-2 py-1 rounded text-red-600 dark:text-red-400 text-sm font-medium`}
           {...otherProps}
         >
           {children}

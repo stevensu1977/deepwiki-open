@@ -3,215 +3,13 @@
 import React, { useState, useRef, useEffect, useCallback, useMemo } from 'react';
 import { FaChevronLeft, FaChevronRight, FaSearch, FaCode, FaToggleOn, FaToggleOff, FaMoon, FaSun, FaCog,FaHome,FaBars } from 'react-icons/fa';
 import { MdSend } from 'react-icons/md';
-import ReactMarkdown from 'react-markdown';
-import remarkGfm from 'remark-gfm';
-import rehypeRaw from 'rehype-raw';
-import { Prism as SyntaxHighlighter } from 'react-syntax-highlighter';
-import { vscDarkPlus } from 'react-syntax-highlighter/dist/esm/styles/prism';
 
 import MCPSettings from './MCPSettings';
+import Markdown from './Markdown';
 import { getChatUrls } from '../config/api';
-import router from 'next/router';
 
-// 在组件外部定义 Markdown 渲染组件
-const components = {
-  code({ inline, className, children, ...props }) {
-    const match = /language-(\w+)/.exec(className || '');
-    const codeContent = children ? String(children).replace(/\n$/, '') : '';
-    
-    // 处理 Mermaid 图表 - 显示为代码块
-    if (!inline && match && match[1] === 'mermaid') {
-      return (
-        <div className="my-4 rounded-md overflow-hidden">
-          <div className="bg-gray-800 px-4 py-2 text-xs text-gray-400 flex justify-between items-center">
-            <span>mermaid</span>
-            <button
-              onClick={() => {
-                navigator.clipboard.writeText(codeContent);
-              }}
-              className="text-gray-400 hover:text-white"
-              title="Copy code"
-            >
-              <svg
-                xmlns="http://www.w3.org/2000/svg"
-                className="h-4 w-4"
-                fill="none"
-                viewBox="0 0 24 24"
-                stroke="currentColor"
-              >
-                <path
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                  strokeWidth={2}
-                  d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z"
-                />
-              </svg>
-            </button>
-          </div>
-          <SyntaxHighlighter
-            language="mermaid"
-            style={vscDarkPlus}
-            className="!text-xs"
-            customStyle={{ margin: 0, borderRadius: '0 0 0.375rem 0.375rem' }}
-            showLineNumbers={true}
-            wrapLines={true}
-            wrapLongLines={true}
-          >
-            {codeContent}
-          </SyntaxHighlighter>
-        </div>
-      );
-    }
-    
-    // 处理代码块
-    if (!inline && match) {
-      return (
-        <div className="my-4 rounded-md overflow-hidden">
-          <div className="bg-gray-800 px-4 py-2 text-xs text-gray-400 flex justify-between items-center">
-            <span>{match[1]}</span>
-            <button
-              onClick={() => {
-                navigator.clipboard.writeText(codeContent);
-              }}
-              className="text-gray-400 hover:text-white"
-              title="Copy code"
-            >
-              <svg
-                xmlns="http://www.w3.org/2000/svg"
-                className="h-4 w-4"
-                fill="none"
-                viewBox="0 0 24 24"
-                stroke="currentColor"
-              >
-                <path
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                  strokeWidth={2}
-                  d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z"
-                />
-              </svg>
-            </button>
-          </div>
-          <SyntaxHighlighter
-            language={match[1]}
-            style={vscDarkPlus}
-            className="!text-xs"
-            customStyle={{ margin: 0, borderRadius: '0 0 0.375rem 0.375rem' }}
-            showLineNumbers={true}
-            wrapLines={true}
-            wrapLongLines={true}
-            {...props}
-          >
-            {codeContent}
-          </SyntaxHighlighter>
-        </div>
-      );
-    }
-    
-    // 处理内联代码
-    return (
-      <code
-        className={`${className} font-mono bg-gray-100 dark:bg-gray-800 px-1.5 py-0.5 rounded text-pink-500 dark:text-pink-400 text-xs`}
-        {...props}
-      >
-        {children}
-      </code>
-    );
-  },
-  
-  // 其他 Markdown 组件
-  p({ children, ...props }) {
-    return <p className="mb-2 text-sm dark:text-white" {...props}>{children}</p>;
-  },
-  h1({ children, ...props }) {
-    return <h1 className="text-xl font-bold mt-4 mb-2 dark:text-white" {...props}>{children}</h1>;
-  },
-  h2({ children, ...props }) {
-    return <h2 className="text-lg font-bold mt-3 mb-2 dark:text-white" {...props}>{children}</h2>;
-  },
-  h3({ children, ...props }) {
-    return <h3 className="text-base font-semibold mt-3 mb-1 dark:text-white" {...props}>{children}</h3>;
-  },
-  h4({ children, ...props }) {
-    return <h4 className="text-sm font-semibold mt-2 mb-1 dark:text-white" {...props}>{children}</h4>;
-  },
-  ul({ children, ...props }) {
-    return <ul className="list-disc pl-5 mb-2 text-sm dark:text-white" {...props}>{children}</ul>;
-  },
-  ol({ children, ...props }) {
-    return <ol className="list-decimal pl-5 mb-2 text-sm dark:text-white" {...props}>{children}</ol>;
-  },
-  li({ children, ...props }) {
-    return <li className="mb-1 text-sm dark:text-white" {...props}>{children}</li>;
-  },
-  a({ children, href, ...props }) {
-    return (
-      <a
-        href={href}
-        className="text-purple-600 dark:text-purple-400 hover:underline"
-        target="_blank"
-        rel="noopener noreferrer"
-        {...props}
-      >
-        {children}
-      </a>
-    );
-  },
-  blockquote({ children, ...props }) {
-    return (
-      <blockquote
-        className="border-l-4 border-gray-300 dark:border-gray-600 pl-4 py-1 my-2 text-gray-600 dark:text-gray-400 italic"
-        {...props}
-      >
-        {children}
-      </blockquote>
-    );
-  },
-  table({ children, ...props }) {
-    return (
-      <div className="overflow-x-auto my-4">
-        <table className="min-w-full divide-y divide-gray-200 dark:divide-gray-700 text-sm" {...props}>
-          {children}
-        </table>
-      </div>
-    );
-  },
-  thead({ children, ...props }) {
-    return (
-      <thead className="bg-gray-50 dark:bg-gray-800" {...props}>
-        {children}
-      </thead>
-    );
-  },
-  tbody({ children, ...props }) {
-    return (
-      <tbody className="divide-y divide-gray-200 dark:divide-gray-700" {...props}>
-        {children}
-      </tbody>
-    );
-  },
-  tr({ children, ...props }) {
-    return (
-      <tr className="hover:bg-gray-50 dark:hover:bg-gray-800" {...props}>
-        {children}
-      </tr>
-    );
-  },
-  th({ children, ...props }) {
-    return (
-      <th className="px-3 py-2 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider" {...props}>
-        {children}
-      </th>
-    );
-  },
-  td({ children, ...props }) {
-    return (
-      <td className="px-3 py-2 whitespace-nowrap" {...props}>
-        {children}
-      </td>
-    );
-  },
-};
+
+// 移除了重复的markdown组件定义，现在使用统一的Markdown组件
 
 interface MCPServer {
   id: string;
@@ -268,7 +66,7 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({
   const [fileTree, setFileTree] = useState<string[]>([]);
   const [highlightedFiles, setHighlightedFiles] = useState<string[]>([]);
   const [isLoadingFileTree, setIsLoadingFileTree] = useState(true);
-  const [codeBrowserMode, setCodeBrowserMode] = useState<'full' | 'minimal'>('full');
+  const [codeBrowserMode, setCodeBrowserMode] = useState<'full' | 'minimal' | 'hidden'>('full');
 
   
   const messagesEndRef = useRef<HTMLDivElement>(null);
@@ -325,7 +123,8 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({
     const loadFileTree = async () => {
       try {
         setIsLoadingFileTree(true);
-        const url = `${getChatUrls().base}/api/v2/documentation/file-tree/${repoOwner}/${repoName}`;
+        // Use main API service for file tree (port 8001)
+        const url = `${process.env.NEXT_PUBLIC_API_BASE_URL || 'http://localhost:8001'}/api/v2/documentation/file-tree/${repoOwner}/${repoName}`;
         const response = await fetch(url);
 
         if (response.ok) {
@@ -472,12 +271,15 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({
         
         const chunk = decoder.decode(value, { stream: true });
         
-        // 更新最后一条消息的内容
+        // 更新最后一条消息的内容 - 使用不可变更新
         setMessages(prev => {
           const newMessages = [...prev];
-          const lastMessage = newMessages[newMessages.length - 1];
-          if (lastMessage.role === 'assistant') {
-            lastMessage.content += chunk;
+          const lastIndex = newMessages.length - 1;
+          if (lastIndex >= 0 && newMessages[lastIndex].role === 'assistant') {
+            newMessages[lastIndex] = {
+              ...newMessages[lastIndex],
+              content: newMessages[lastIndex].content + chunk
+            };
           }
           return newMessages;
         });
@@ -594,7 +396,8 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({
   // Load file content when a file is selected
   const loadFileContent = async (filePath: string): Promise<CodeFile | null> => {
     try {
-      const response = await fetch(`${getChatUrls().base}/api/v2/repository/file/${repoOwner}/${repoName}/${filePath}`);
+      // Use main API service for file content (port 8001)
+      const response = await fetch(`${process.env.NEXT_PUBLIC_API_BASE_URL || 'http://localhost:8001'}/api/v2/repository/file/${repoOwner}/${repoName}/${filePath}`);
 
       if (response.ok) {
         const data = await response.json();
@@ -660,6 +463,7 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({
   // Calculate dynamic widths based on code browser mode
   const getChatWidth = () => {
     switch (codeBrowserMode) {
+      case 'hidden': return 'w-full';
       case 'minimal': return 'w-3/4';
       case 'full':
       default: return 'w-1/2';
@@ -668,6 +472,7 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({
 
   const getCodeBrowserWidth = () => {
     switch (codeBrowserMode) {
+      case 'hidden': return 'w-0';
       case 'minimal': return 'w-1/4';
       case 'full':
       default: return 'w-1/2';
@@ -709,14 +514,25 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({
             <FaBars />
           </button>
           
-          <button 
+          {/* Show Code Browser button when hidden */}
+          {codeBrowserMode === 'hidden' && (
+            <button
+              onClick={() => setCodeBrowserMode('full')}
+              className={`p-2 rounded-md mr-2 ${isDarkMode ? 'hover:bg-gray-700' : 'hover:bg-gray-100'}`}
+              title="Show Code Browser"
+            >
+              <FaCode />
+            </button>
+          )}
+
+          <button
             onClick={() => setShowSettings(true)}
             className={`p-2 rounded-md mr-2 ${isDarkMode ? 'hover:bg-gray-700' : 'hover:bg-gray-100'}`}
             title="Settings"
           >
             <FaCog />
           </button>
-          <button 
+          <button
             onClick={onToggleDarkMode}
             className={`p-2 rounded-md ${isDarkMode ? 'hover:bg-gray-700' : 'hover:bg-gray-100'}`}
             title={isDarkMode ? "Switch to light mode" : "Switch to dark mode"}
@@ -736,15 +552,7 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({
                 {message.role === 'user' ? 'You' : 'DeepWiki'}
               </div>
               <div className={`${isDarkMode ? 'text-gray-300' : 'text-gray-700'}`}>
-                <div className="prose prose-sm dark:prose-invert max-w-none">
-                  <ReactMarkdown
-                    remarkPlugins={[remarkGfm]}
-                    rehypePlugins={[rehypeRaw]}
-                    components={components}
-                  >
-                    {message.content}
-                  </ReactMarkdown>
-                </div>
+                <Markdown content={message.content} />
               </div>
             </div>
           ))}
@@ -815,9 +623,10 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({
       </div>
       
       {/* Right sidebar - Code browser */}
-      <div className={`${getCodeBrowserWidth()} border-l transition-all duration-300 ease-in-out ${
-        isDarkMode ? 'border-gray-700 bg-gray-800' : 'border-gray-200'
-      } ${codeBrowserMode === 'minimal' ? 'overflow-hidden' : ''}`}>
+      {codeBrowserMode !== 'hidden' && (
+        <div className={`${getCodeBrowserWidth()} border-l transition-all duration-300 ease-in-out ${
+          isDarkMode ? 'border-gray-700 bg-gray-800' : 'border-gray-200'
+        } ${codeBrowserMode === 'minimal' ? 'overflow-hidden' : ''}`}>
         <div className="flex items-center p-4 border-b border-gray-200 dark:border-gray-700">
           <div className="flex-1">
             <h2 className={`font-semibold ${codeBrowserMode === 'minimal' ? 'text-sm' : 'text-lg'}`}>
@@ -837,8 +646,10 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({
             onClick={() => {
               if (codeBrowserMode === 'full') {
                 setCodeBrowserMode('minimal');
+              } else if (codeBrowserMode === 'minimal') {
+                setCodeBrowserMode('hidden');
               } else {
-                // From minimal, always go back to full
+                // From hidden, go back to full
                 setCodeBrowserMode('full');
               }
             }}
@@ -846,11 +657,15 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({
             title={
               codeBrowserMode === 'full'
                 ? 'Minimize code browser'
-                : 'Expand code browser'
+                : codeBrowserMode === 'minimal'
+                ? 'Hide code browser'
+                : 'Show code browser'
             }
           >
             {codeBrowserMode === 'full' ? (
               <FaChevronRight size={12} />
+            ) : codeBrowserMode === 'minimal' ? (
+              <FaBars size={12} />
             ) : (
               <FaChevronLeft size={12} />
             )}
@@ -1008,7 +823,8 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({
           )}
         </div>
       </div>
-      
+      )}
+
       {/* MCP Settings Modal */}
       {showSettings && (
         <MCPSettings 

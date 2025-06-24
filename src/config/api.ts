@@ -1,10 +1,10 @@
 // API Configuration
 export const API_CONFIG = {
   // Main API service for documentation generation and management
-  API_BASE_URL: process.env.NEXT_PUBLIC_API_BASE_URL || 'http://localhost:8002',
-  
+  API_BASE_URL: process.env.NEXT_PUBLIC_API_BASE_URL || 'http://localhost:8001',
+
   // Chat service for repository chat functionality
-  CHAT_BASE_URL: process.env.NEXT_PUBLIC_CHAT_BASE_URL || 'http://localhost:8001',
+  CHAT_BASE_URL: process.env.NEXT_PUBLIC_CHAT_BASE_URL || 'http://localhost:8002',
   
   // API endpoints
   ENDPOINTS: {
