@@ -13,7 +13,7 @@ import asyncio
 import threading
 from concurrent.futures import ThreadPoolExecutor
 
-from api.simple_chat import chat_completions_stream, chat_completions_stream_v2
+# Chat functionality will be implemented directly in this file to avoid circular imports
 
 # Import database module
 from api.database import (
@@ -221,9 +221,7 @@ class DocumentContentResponse(BaseModel):
     repository: str = Field(..., description="Repository identifier")
     content: Optional[str] = Field(None, description="Document content")
 
-# Add the chat_completions_stream endpoint to the main app
-app.add_api_route("/chat/completions/stream", chat_completions_stream, methods=["POST"])
-app.add_api_route("/chat/completions/stream/v2", chat_completions_stream_v2, methods=["POST"])
+# Chat endpoints will be implemented directly below to avoid circular imports
 
 # Create RAG instance
 rag = RAG()
@@ -1865,3 +1863,370 @@ async def get_content_types(
             total_results=0,
             results=[]
         )
+
+# ============================================================================
+# CHAT FUNCTIONALITY - Integrated from simple_chat.py
+# ============================================================================
+
+import asyncio
+from typing import AsyncGenerator
+
+# Chat-related models
+class ChatMessage(BaseModel):
+    """
+    Model for a chat message.
+    """
+    role: str = Field(..., description="Role of the message sender (user, assistant, system)")
+    content: str = Field(..., description="Content of the message")
+
+class ChatCompletionRequest(BaseModel):
+    """
+    Model for requesting a chat completion.
+    """
+    repo_url: str = Field(..., description="URL of the repository to query")
+    messages: List[ChatMessage] = Field(..., description="List of chat messages")
+    filePath: Optional[str] = Field(None, description="Optional path to a file in the repository to include in the prompt")
+    github_token: Optional[str] = Field(None, description="GitHub personal access token for private repositories")
+    gitlab_token: Optional[str] = Field(None, description="GitLab personal access token for private repositories")
+    local_ollama: Optional[bool] = Field(False, description="Use locally run Ollama model for embedding and generation")
+    bitbucket_token: Optional[str] = Field(None, description="Bitbucket personal access token for private repositories")
+    mcp_server: Optional[dict] = Field(None, description="MCP server configuration with URL")
+
+# Simple token counting function
+def count_tokens(text: str, local_ollama: bool = False) -> int:
+    """Simple token estimation: 4 characters per token"""
+    return len(text) // 4
+
+# Simple config
+chat_configs = {
+    "strands_agent": {
+        "model": "anthropic.claude-3-5-sonnet-20241022-v2:0",
+        "temperature": 0.1,
+        "max_tokens": 4000
+    }
+}
+
+@app.post("/chat/completions/stream/v2")
+async def chat_completions_stream_v2(request: ChatCompletionRequest):
+    """
+    Generate a streaming chat completion response using enhanced RAG LanceDB search and optional MCP tools
+
+    This endpoint provides:
+    1. Enhanced LanceDB RAG search with FastEmbed embeddings
+    2. Optional MCP (Model Context Protocol) tool integration
+    3. Strands Agent framework for tool orchestration
+    4. Streaming response for real-time interaction
+    """
+    try:
+        # Log request details
+        logger.info(f"Chat completion request for repo: {request.repo_url}")
+
+        # Extract the last user message
+        user_messages = [msg for msg in request.messages if msg.role == "user"]
+        if not user_messages:
+            raise HTTPException(status_code=400, detail="No user message found")
+
+        query = user_messages[-1].content
+        logger.info(f"User query: {query}")
+
+        # Count tokens for logging
+        request_tokens = count_tokens(query, request.local_ollama)
+        logger.info(f"Request size: {request_tokens} tokens")
+
+        # Extract repo info
+        owner, repo_name = extract_repo_info(request.repo_url)
+        logger.info(f"Extracted repo info: {owner}/{repo_name}")
+
+        async def generate() -> AsyncGenerator[str, None]:
+            try:
+                # Import required modules
+                from strands import Agent
+                from strands.models.bedrock import BedrockModel
+
+                # Initialize basic tools
+                tools = []
+
+                # Note: HTTP request tool not available, will use only LanceDB and MCP tools
+
+                # Try to add LanceDB RAG search tool
+                try:
+                    from rag_lancedb import rag_manager
+
+                    # Check if LanceDB table exists for this repository
+                    table_exists = rag_manager.table_exists(f"{owner}_{repo_name}")
+                    logger.info(f"RAG LanceDB table exists for {owner}/{repo_name}: {table_exists}")
+
+                    if not table_exists:
+                        logger.warning(f"RAG LanceDB not available for {owner}/{repo_name}. Table exists: {table_exists}")
+
+                    # Create enhanced LanceDB search tool
+                    def lancedb_search(query: str, limit: int = 5) -> str:
+                        """
+                        Search repository documentation using enhanced RAG LanceDB with FastEmbed embeddings.
+
+                        Args:
+                            query: Search query
+                            limit: Maximum number of results to return
+
+                        Returns:
+                            Search results with relevance scores and file paths
+                        """
+                        try:
+                            results = rag_manager.search(
+                                table_name=f"{owner}_{repo_name}",
+                                query=query,
+                                limit=limit
+                            )
+
+                            if not results:
+                                return f"No documentation found for query: {query}"
+
+                            # Format results with relevance scores
+                            formatted_results = []
+                            for i, result in enumerate(results, 1):
+                                score = result.get('_distance', 0)
+                                relevance = max(0, 1 - score)  # Convert distance to relevance
+                                file_path = result.get('file_path', 'Unknown')
+                                title = result.get('title', 'Untitled')
+                                content = result.get('content', '')[:500]  # Limit content length
+
+                                formatted_results.append(
+                                    f"**Result {i}** (Relevance: {relevance:.3f})\n"
+                                    f"**File:** {file_path}\n"
+                                    f"**Title:** {title}\n"
+                                    f"**Content:** {content}...\n"
+                                )
+
+                            return "\n".join(formatted_results)
+
+                        except Exception as e:
+                            logger.error(f"LanceDB search error: {e}")
+                            return f"Error searching documentation: {str(e)}"
+
+                    # Add the LanceDB search tool to the tools list
+                    tools.append(lancedb_search)
+                    logger.info("Enhanced RAG LanceDB search tool added to agent")
+
+                except ImportError as e:
+                    logger.warning(f"RAG LanceDB not available: {e}")
+                except Exception as e:
+                    logger.error(f"Error setting up RAG LanceDB: {e}")
+
+                # Initialize MCP client if provided
+                github_search_client = None
+                mcp_server = request.mcp_server
+
+                if mcp_server:
+                    try:
+                        # Import MCP modules only when needed
+                        from mcp.client.streamable_http import streamablehttp_client
+                        from strands.tools.mcp import MCPClient
+
+                        # Create a debug wrapper for the MCP client to log payloads
+                        class DebugMCPClient(MCPClient):
+                            def __init__(self, transport_callable):
+                                super().__init__(transport_callable)
+                                self.request_count = 0
+
+                            def call_tool_sync(self, tool_use_id: str, name: str, arguments: dict = None, read_timeout_seconds=None):
+                                self.request_count += 1
+                                logger.info(f"=== MCP Request #{self.request_count} ===")
+                                logger.info(f"Tool Use ID: {tool_use_id}")
+                                logger.info(f"Tool Name: {name}")
+                                logger.info(f"Arguments: {arguments}")
+                                logger.info(f"Read Timeout: {read_timeout_seconds}")
+
+                                try:
+                                    result = super().call_tool_sync(tool_use_id, name, arguments, read_timeout_seconds)
+                                    logger.info(f"=== MCP Response #{self.request_count} ===")
+                                    logger.info(f"Response Type: {type(result)}")
+                                    logger.info(f"Response Content: {result}")
+                                    logger.info(f"=== End MCP Request #{self.request_count} ===")
+                                    return result
+                                except Exception as e:
+                                    logger.error(f"=== MCP Error #{self.request_count} ===")
+                                    logger.error(f"Error Type: {type(e).__name__}")
+                                    logger.error(f"Error Message: {str(e)}")
+                                    logger.error(f"=== End MCP Error #{self.request_count} ===")
+                                    raise
+
+                        # Initialize MCP client with debug wrapper
+                        github_search_client = DebugMCPClient(
+                            lambda: streamablehttp_client(mcp_server.get("url"))
+                        )
+                        logger.info(f"MCP server configured with debug logging: {mcp_server.get('url')}")
+                    except Exception as e:
+                        logger.error(f"Failed to initialize MCP client: {e}")
+                        github_search_client = None
+
+                # Create model instance with specific system prompt for Markdown output
+                bedrock_model = BedrockModel(
+                    model_id=chat_configs["strands_agent"]["model"],
+                    temperature=chat_configs["strands_agent"]["temperature"],
+                    max_tokens=chat_configs["strands_agent"]["max_tokens"],
+                    top_p=0.8,
+                    system_prompt=(
+                        "You are a helpful AI assistant that provides information about code repositories. "
+                        "You have access to repository documentation through an enhanced RAG LanceDB search tool "
+                        "that uses FastEmbed embeddings and hybrid search (combining vector similarity and full-text search). "
+                        "ALWAYS try to search the repository documentation first using the lancedb_search function "
+                        "before falling back to other tools like GitHub search. "
+                        "The enhanced search provides highly accurate results with relevance scores. "
+                        "When a user asks about the repository, use lancedb_search to find relevant documentation. "
+                        "Format your responses using Markdown syntax for better readability. "
+                        "Use code blocks with language specifiers, headings, lists, and other Markdown "
+                        "features to structure your response. For code examples, always use ```language "
+                        "syntax. For important information, use **bold** or *italic* formatting. "
+                        "When referencing documentation found through search, cite the file paths, titles, and relevance scores."
+                    )
+                )
+
+                # Extract previous context and create enhanced prompt
+                prompt = f"""Repository: {request.repo_url}
+
+User Query: {query}
+
+Instructions:
+1. First, search the repository documentation using lancedb_search to find relevant information
+2. If no relevant documentation is found, you may use other available tools
+3. Provide a comprehensive answer based on the documentation found
+4. Format your response in Markdown
+5. Include references to the documentation sources when applicable"""
+
+                # Log the prompt in debug mode
+                if DEBUG_MODE:
+                    logger.debug(f"Prompt sent to model: {prompt}")
+
+                # If MCP client is available, use it within proper context management
+                if github_search_client:
+                    try:
+                        # Use a context manager to properly initialize and close the MCP client
+                        # ALL MCP operations must be within this context
+                        with github_search_client:
+                            # Get tools from the MCP server
+                            all_mcp_tools = github_search_client.list_tools_sync()
+                            logger.info(f"Retrieved {len(all_mcp_tools)} MCP tools from server")
+
+                            # Filter MCP tools - only allow search_codes, block ingestion_codes and search_website
+                            allowed_tools = []
+                            blocked_tools = ['ingestion_codes', 'search_website']
+
+                            for tool in all_mcp_tools:
+                                # Check different possible attributes for tool name
+                                tool_name = None
+                                if hasattr(tool, 'tool_name'):
+                                    tool_name = tool.tool_name
+                                elif hasattr(tool, 'name'):
+                                    tool_name = tool.name
+                                elif hasattr(tool, '__name__'):
+                                    tool_name = tool.__name__
+
+                                if tool_name and tool_name not in blocked_tools:
+                                    allowed_tools.append(tool)
+                                    logger.info(f"Allowed MCP tool: {tool_name}")
+                                elif tool_name in blocked_tools:
+                                    logger.info(f"Blocked MCP tool: {tool_name}")
+                                else:
+                                    logger.warning(f"Unknown MCP tool structure: {tool}")
+
+                            # Add only allowed MCP tools to our tools list
+                            all_tools = tools + allowed_tools
+                            logger.info(f"Total tools available: {len(all_tools)} (filtered from {len(all_mcp_tools)} MCP tools)")
+
+                            # Initialize Agent with model instance and all tools (including MCP tools)
+                            # IMPORTANT: Agent creation must be within MCP context
+                            agent = Agent(
+                                model=bedrock_model,
+                                tools=all_tools
+                            )
+
+                            # Define a function to run the agent call
+                            def run_agent_with_mcp():
+                                return agent(prompt)
+
+                            # Run the agent call in a thread executor to avoid blocking
+                            # IMPORTANT: Agent execution must be within MCP context
+                            loop = asyncio.get_event_loop()
+                            response = await loop.run_in_executor(None, run_agent_with_mcp)
+
+                            # Convert response to string
+                            response_str = str(response)
+
+                            # Log the response in debug mode
+                            if DEBUG_MODE:
+                                logger.debug(f"Full model response: {response_str}")
+
+                            # Stream the response by lines to preserve markdown formatting
+                            lines = response_str.split('\n')
+                            for i, line in enumerate(lines):
+                                # Add newline back except for the last line
+                                if i < len(lines) - 1:
+                                    yield line + '\n'
+                                else:
+                                    yield line
+                                # Add a small delay to simulate streaming
+                                await asyncio.sleep(0.02)
+
+                    except Exception as e:
+                        logger.error(f"Failed to use MCP tools: {e}")
+                        logger.error(traceback.format_exc())
+                        # Fall back to non-MCP mode
+                        agent = Agent(
+                            model=bedrock_model,
+                            tools=tools
+                        )
+
+                        def run_agent_fallback():
+                            return agent(prompt)
+
+                        loop = asyncio.get_event_loop()
+                        response = await loop.run_in_executor(None, run_agent_fallback)
+                        response_str = str(response)
+
+                        if DEBUG_MODE:
+                            logger.debug(f"Fallback model response: {response_str}")
+
+                        chunk_size = 10
+                        for i in range(0, len(response_str), chunk_size):
+                            chunk = response_str[i:i+chunk_size]
+                            yield chunk
+                            await asyncio.sleep(0.01)
+                else:
+                    # No MCP client, use only basic tools
+                    agent = Agent(
+                        model=bedrock_model,
+                        tools=tools
+                    )
+
+                    def run_agent_basic():
+                        return agent(prompt)
+
+                    loop = asyncio.get_event_loop()
+                    response = await loop.run_in_executor(None, run_agent_basic)
+                    response_str = str(response)
+
+                    if DEBUG_MODE:
+                        logger.debug(f"Basic model response: {response_str}")
+
+                    # Stream the response by lines to preserve markdown formatting
+                    lines = response_str.split('\n')
+                    for i, line in enumerate(lines):
+                        # Add newline back except for the last line
+                        if i < len(lines) - 1:
+                            yield line + '\n'
+                        else:
+                            yield line
+                        await asyncio.sleep(0.02)
+
+            except Exception as e:
+                error_msg = f"Error generating response: {str(e)}"
+                logger.error(error_msg)
+                logger.error(traceback.format_exc())
+                yield error_msg
+
+        return StreamingResponse(generate(), media_type="text/plain")
+
+    except Exception as e:
+        logger.error(f"Error in chat_completions_stream_v2: {str(e)}")
+        logger.error(traceback.format_exc())
+        raise HTTPException(status_code=500, detail=str(e))

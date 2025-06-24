@@ -326,28 +326,6 @@ async def chat_completions_stream_v2(request: ChatCompletionRequest):
                     )
                 )
                 
-                # If MCP client is available, use it to get additional tools
-                if github_search_client:
-                    try:
-                        # Use a context manager to properly initialize and close the MCP client
-                        with github_search_client:
-                            # Get tools from the MCP server
-                            mcp_tools = github_search_client.list_tools_sync()
-
-                            # Add MCP tools to our tools list
-                            print(mcp_tools)
-                            tools.extend(mcp_tools)
-                            logger.info(f"Added {len(mcp_tools)} MCP tools to agent")
-                    except Exception as e:
-                        logger.error(f"Failed to initialize MCP tools: {e}")
-                        # Continue without MCP tools
-
-                # Initialize Agent with model instance and tools (with or without MCP tools)
-                agent = Agent(
-                    model=bedrock_model,
-                    tools=tools
-                )
-
                 # Extract previous context and create enhanced prompt
                 prompt = f"""Repository: {request.repo_url}
 
@@ -364,32 +342,104 @@ Instructions:
                 if DEBUG_MODE:
                     logger.debug(f"Prompt sent to model: {prompt}")
 
-                # Since astream is not available, we'll use the synchronous call
-                # but wrap it in a background task to avoid blocking
-                loop = asyncio.get_event_loop()
+                # If MCP client is available, use it within proper context management
+                if github_search_client:
+                    try:
+                        # Use a context manager to properly initialize and close the MCP client
+                        # ALL MCP operations must be within this context
+                        with github_search_client:
+                            # Get tools from the MCP server
+                            mcp_tools = github_search_client.list_tools_sync()
+                            logger.info(f"Retrieved {len(mcp_tools)} MCP tools")
 
-                # Define a function to run the agent call in a separate thread
-                def run_agent():
-                    return agent(prompt)
+                            # Add MCP tools to our tools list
+                            all_tools = tools + mcp_tools
+                            logger.info(f"Total tools available: {len(all_tools)}")
 
-                # Run the agent call in a thread executor to avoid blocking
-                response = await loop.run_in_executor(None, run_agent)
+                            # Initialize Agent with model instance and all tools (including MCP tools)
+                            # IMPORTANT: Agent creation must be within MCP context
+                            agent = Agent(
+                                model=bedrock_model,
+                                tools=all_tools
+                            )
 
-                # Convert response to string
-                response_str = str(response)
+                            # Define a function to run the agent call
+                            def run_agent_with_mcp():
+                                return agent(prompt)
 
-                # Log the response in debug mode
-                if DEBUG_MODE:
-                    logger.debug(f"Full model response: {response_str}")
+                            # Run the agent call in a thread executor to avoid blocking
+                            # IMPORTANT: Agent execution must be within MCP context
+                            loop = asyncio.get_event_loop()
+                            response = await loop.run_in_executor(None, run_agent_with_mcp)
 
-                # Since we can't stream directly, we'll simulate streaming by
-                # sending chunks of the response
-                chunk_size = 10  # Characters per chunk
-                for i in range(0, len(response_str), chunk_size):
-                    chunk = response_str[i:i+chunk_size]
-                    yield chunk
-                    # Add a small delay to simulate streaming
-                    await asyncio.sleep(0.01)
+                            # Convert response to string
+                            response_str = str(response)
+
+                            # Log the response in debug mode
+                            if DEBUG_MODE:
+                                logger.debug(f"Full model response: {response_str}")
+
+                            # Stream the response by lines to preserve markdown formatting
+                            lines = response_str.split('\n')
+                            for i, line in enumerate(lines):
+                                # Add newline back except for the last line
+                                if i < len(lines) - 1:
+                                    yield line + '\n'
+                                else:
+                                    yield line
+                                # Add a small delay to simulate streaming
+                                await asyncio.sleep(0.02)
+
+                    except Exception as e:
+                        logger.error(f"Failed to use MCP tools: {e}")
+                        logger.error(traceback.format_exc())
+                        # Fall back to non-MCP mode
+                        agent = Agent(
+                            model=bedrock_model,
+                            tools=tools
+                        )
+
+                        def run_agent_fallback():
+                            return agent(prompt)
+
+                        loop = asyncio.get_event_loop()
+                        response = await loop.run_in_executor(None, run_agent_fallback)
+                        response_str = str(response)
+
+                        if DEBUG_MODE:
+                            logger.debug(f"Fallback model response: {response_str}")
+
+                        chunk_size = 10
+                        for i in range(0, len(response_str), chunk_size):
+                            chunk = response_str[i:i+chunk_size]
+                            yield chunk
+                            await asyncio.sleep(0.01)
+                else:
+                    # No MCP client, use only basic tools
+                    agent = Agent(
+                        model=bedrock_model,
+                        tools=tools
+                    )
+
+                    def run_agent_basic():
+                        return agent(prompt)
+
+                    loop = asyncio.get_event_loop()
+                    response = await loop.run_in_executor(None, run_agent_basic)
+                    response_str = str(response)
+
+                    if DEBUG_MODE:
+                        logger.debug(f"Basic model response: {response_str}")
+
+                    # Stream the response by lines to preserve markdown formatting
+                    lines = response_str.split('\n')
+                    for i, line in enumerate(lines):
+                        # Add newline back except for the last line
+                        if i < len(lines) - 1:
+                            yield line + '\n'
+                        else:
+                            yield line
+                        await asyncio.sleep(0.02)
                 
             except Exception as e:
                 error_msg = f"Error generating response: {str(e)}"
