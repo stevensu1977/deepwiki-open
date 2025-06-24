@@ -3,6 +3,8 @@
 import React, { useState, useRef, useEffect, useCallback, useMemo } from 'react';
 import { FaChevronLeft, FaChevronRight, FaSearch, FaCode, FaToggleOn, FaToggleOff, FaMoon, FaSun, FaCog,FaHome,FaBars } from 'react-icons/fa';
 import { MdSend } from 'react-icons/md';
+import { Prism as SyntaxHighlighter } from 'react-syntax-highlighter';
+import { vscDarkPlus } from 'react-syntax-highlighter/dist/esm/styles/prism';
 
 import MCPSettings from './MCPSettings';
 import Markdown from './Markdown';
@@ -196,13 +198,13 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({
         setHighlightedFiles(mentioned);
       }
     }
-  }, [messages, extractMentionedFiles]);
+  }, [messages, extractMentionedFiles, fileTree.length]);
 
   const handleSendMessage = async () => {
     if (!inputValue.trim() || isLoading) return;
     
     // 添加用户消息
-    const userMessage = { role: 'user', content: inputValue };
+    const userMessage: Message = { role: 'user', content: inputValue };
     setMessages(prev => [...prev, userMessage]);
     setIsLoading(true);
     

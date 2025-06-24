@@ -2,7 +2,7 @@ import React, { useEffect, useRef, useState } from 'react';
 import { FaSearchPlus, FaSearchMinus, FaSearch, FaTimes } from 'react-icons/fa';
 
 // Mermaid will be dynamically imported to avoid SSR issues
-let mermaid: any = null;
+let mermaid: typeof import('mermaid').default | null = null;
 
 // Initialize mermaid configuration
 const initializeMermaid = async () => {

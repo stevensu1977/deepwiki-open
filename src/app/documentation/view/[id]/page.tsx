@@ -63,7 +63,7 @@ const DocumentationViewPage: React.FC = () => {
     if (id) {
       fetchDocumentation();
     }
-  }, [id]);
+  }, [id, API_BASE_URL]);
 
   // 提取标题
   useEffect(() => {
@@ -91,8 +91,14 @@ const DocumentationViewPage: React.FC = () => {
   // 渲染 Mermaid 图表
   useEffect(() => {
     if (!loading && content) {
-      setTimeout(() => {
-        mermaid.init('.mermaid');
+      setTimeout(async () => {
+        try {
+          await mermaid.run({
+            querySelector: '.mermaid'
+          });
+        } catch (error) {
+          console.error('Error rendering Mermaid diagrams:', error);
+        }
       }, 200);
     }
   }, [loading, content]);
@@ -284,7 +290,7 @@ const DocumentationViewPage: React.FC = () => {
             remarkPlugins={[remarkGfm]}
             rehypePlugins={[rehypeRaw]}
             components={{
-              h1: ({ node, children, ...props }) => {
+              h1: ({ children, ...props }) => {
                 const text = String(children).replace(/\s+/g, ' ').trim();
                 const id = text.toLowerCase().replace(/[^\w\s-]/g, '').replace(/\s+/g, '-');
                 return (
@@ -293,7 +299,7 @@ const DocumentationViewPage: React.FC = () => {
                   </h1>
                 );
               },
-              h2: ({ node, children, ...props }) => {
+              h2: ({ children, ...props }) => {
                 const text = String(children).replace(/\s+/g, ' ').trim();
                 const id = text.toLowerCase().replace(/[^\w\s-]/g, '').replace(/\s+/g, '-');
                 return (
@@ -302,7 +308,7 @@ const DocumentationViewPage: React.FC = () => {
                   </h2>
                 );
               },
-              h3: ({ node, children, ...props }) => {
+              h3: ({ children, ...props }) => {
                 const text = String(children).replace(/\s+/g, ' ').trim();
                 const id = text.toLowerCase().replace(/[^\w\s-]/g, '').replace(/\s+/g, '-');
                 return (
@@ -311,7 +317,7 @@ const DocumentationViewPage: React.FC = () => {
                   </h3>
                 );
               },
-              h4: ({ node, children, ...props }) => {
+              h4: ({ children, ...props }) => {
                 const text = String(children).replace(/\s+/g, ' ').trim();
                 const id = text.toLowerCase().replace(/[^\w\s-]/g, '').replace(/\s+/g, '-');
                 return (
@@ -320,11 +326,18 @@ const DocumentationViewPage: React.FC = () => {
                   </h4>
                 );
               },
-              code({ node, inline, className, children, ...props }) {
+              code(props: {
+                inline?: boolean;
+                className?: string;
+                children?: React.ReactNode;
+                // eslint-disable-next-line @typescript-eslint/no-explicit-any
+                [key: string]: any; // Using any here as it's required for ReactMarkdown components
+              }) {
+                const { inline, className, children, ...otherProps } = props;
                 const match = /language-(\w+)/.exec(className || '');
-                
+
                 if (inline) {
-                  return <code className="bg-gray-100 dark:bg-gray-800 px-1 py-0.5 rounded font-mono text-sm" {...props}>{children}</code>;
+                  return <code className="bg-gray-100 dark:bg-gray-800 px-1 py-0.5 rounded font-mono text-sm" {...otherProps}>{children}</code>;
                 }
                 
                 // 处理 Mermaid 图表
@@ -362,13 +375,13 @@ const DocumentationViewPage: React.FC = () => {
                         style={vscDarkPlus}
                         language={match[1]}
                         PreTag="div"
-                        {...props}
+                        {...otherProps}
                       >
                         {codeContent.replace(/\n$/, '')}
                       </SyntaxHighlighter>
                     ) : (
                       <div className="bg-gray-100 dark:bg-gray-800 p-4 rounded-md">
-                        <code className="block font-mono text-sm whitespace-pre-wrap" {...props}>
+                        <code className="block font-mono text-sm whitespace-pre-wrap" {...otherProps}>
                           {children}
                         </code>
                       </div>
@@ -376,7 +389,7 @@ const DocumentationViewPage: React.FC = () => {
                   </div>
                 );
               },
-              a({ node, children, href, ...props }) {
+              a({ children, href, ...props }) {
                 return (
                   <a 
                     href={href} 
@@ -389,42 +402,42 @@ const DocumentationViewPage: React.FC = () => {
                   </a>
                 );
               },
-              p({ node, children, ...props }) {
+              p({ children, ...props }) {
                 return (
                   <p className="my-3 text-gray-700 dark:text-gray-300 leading-relaxed" {...props}>
                     {children}
                   </p>
                 );
               },
-              ul({ node, children, ...props }) {
+              ul({ children, ...props }) {
                 return (
                   <ul className="list-disc pl-6 my-3 text-gray-700 dark:text-gray-300" {...props}>
                     {children}
                   </ul>
                 );
               },
-              ol({ node, children, ...props }) {
+              ol({ children, ...props }) {
                 return (
                   <ol className="list-decimal pl-6 my-3 text-gray-700 dark:text-gray-300" {...props}>
                     {children}
                   </ol>
                 );
               },
-              li({ node, children, ...props }) {
+              li({ children, ...props }) {
                 return (
                   <li className="my-1" {...props}>
                     {children}
                   </li>
                 );
               },
-              blockquote({ node, children, ...props }) {
+              blockquote({ children, ...props }) {
                 return (
                   <blockquote className="border-l-4 border-gray-300 dark:border-gray-600 pl-4 py-1 my-3 text-gray-600 dark:text-gray-400 italic" {...props}>
                     {children}
                   </blockquote>
                 );
               },
-              table({ node, children, ...props }) {
+              table({ children, ...props }) {
                 return (
                   <div className="overflow-x-auto my-4">
                     <table className="min-w-full divide-y divide-gray-200 dark:divide-gray-700" {...props}>
@@ -433,52 +446,53 @@ const DocumentationViewPage: React.FC = () => {
                   </div>
                 );
               },
-              thead({ node, children, ...props }) {
+              thead({ children, ...props }) {
                 return (
                   <thead className="bg-gray-50 dark:bg-gray-800" {...props}>
                     {children}
                   </thead>
                 );
               },
-              tbody({ node, children, ...props }) {
+              tbody({ children, ...props }) {
                 return (
                   <tbody className="divide-y divide-gray-200 dark:divide-gray-700" {...props}>
                     {children}
                   </tbody>
                 );
               },
-              tr({ node, children, ...props }) {
+              tr({ children, ...props }) {
                 return (
                   <tr className="hover:bg-gray-50 dark:hover:bg-gray-800/50" {...props}>
                     {children}
                   </tr>
                 );
               },
-              th({ node, children, ...props }) {
+              th({ children, ...props }) {
                 return (
                   <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider" {...props}>
                     {children}
                   </th>
                 );
               },
-              td({ node, children, ...props }) {
+              td({ children, ...props }) {
                 return (
                   <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500 dark:text-gray-400" {...props}>
                     {children}
                   </td>
                 );
               },
-              img({ node, src, alt, ...props }) {
+              img({ src, alt, ...props }) {
                 return (
-                  <img 
-                    src={src} 
-                    alt={alt} 
-                    className="max-w-full h-auto my-4 rounded-md" 
-                    {...props} 
+                  // eslint-disable-next-line @next/next/no-img-element
+                  <img
+                    src={src}
+                    alt={alt}
+                    className="max-w-full h-auto my-4 rounded-md"
+                    {...props}
                   />
                 );
               },
-              hr({ node, ...props }) {
+              hr({ ...props }) {
                 return (
                   <hr className="my-6 border-gray-200 dark:border-gray-700" {...props} />
                 );

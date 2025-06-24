@@ -77,7 +77,7 @@ export default function Home() {
     };
 
     loadCompletedDocs();
-  }, []);
+  }, [API_BASE_URL]);
 
   // Handle Add Repo card click
   const handleAddRepoClick = () => {

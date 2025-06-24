@@ -1,12 +1,13 @@
 'use client';
 
-import React, { useState, useEffect } from 'react';
-import { useParams, useRouter } from 'next/navigation';
+import React, { useState, useEffect, useCallback } from 'react';
+import { useParams } from 'next/navigation';
 import Link from 'next/link';
-import { FaHome, FaArrowLeft, FaEye, FaSync, FaBookOpen, FaChevronDown, FaChevronRight, FaSearch } from 'react-icons/fa';
+import { FaHome, FaArrowLeft, FaEye, FaSync, FaChevronDown, FaChevronRight, FaSearch } from 'react-icons/fa';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import rehypeRaw from 'rehype-raw';
+import type { Components } from 'react-markdown';
 import { Prism as SyntaxHighlighter } from 'react-syntax-highlighter';
 import { vscDarkPlus } from 'react-syntax-highlighter/dist/esm/styles/prism';
 import Mermaid from '@/components/Mermaid';
@@ -32,17 +33,14 @@ interface DocumentationStatus {
   repo_url?: string;
 }
 
+
+
 const JobDetailPage: React.FC = () => {
   const params = useParams();
-  const router = useRouter();
 
   const [status, setStatus] = useState<DocumentationStatus | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [refreshing, setRefreshing] = useState<boolean>(false);
-  const [repoUrl, setRepoUrl] = useState<string>('');
-  const [showRepoInput, setShowRepoInput] = useState<boolean>(false);
-  const [refreshProgress, setRefreshProgress] = useState<number>(0);
-  const [refreshStage, setRefreshStage] = useState<string | null>(null);
   const [docContent, setDocContent] = useState<string | null>(null);
   const [loadingContent, setLoadingContent] = useState<boolean>(false);
   const [expandedStages, setExpandedStages] = useState<Set<string>>(new Set());
@@ -57,7 +55,7 @@ const JobDetailPage: React.FC = () => {
   const API_BASE_URL = process.env.NEXT_PUBLIC_API_BASE_URL || 'http://localhost:8002';
 
   // 获取文档内容
-  const fetchDocumentationContent = async () => {
+  const fetchDocumentationContent = useCallback(async () => {
     try {
       setLoadingContent(true);
       // First get the documentation info to get the output_path
@@ -83,10 +81,10 @@ const JobDetailPage: React.FC = () => {
     } finally {
       setLoadingContent(false);
     }
-  };
+  }, [API_BASE_URL, owner, repo]);
 
   // 获取文档生成状态
-  const fetchStatus = async () => {
+  const fetchStatus = useCallback(async () => {
     try {
       console.log('Fetching status for ID:', requestId);
       const response = await fetch(`${API_BASE_URL}/api/v2/documentation/detail/${requestId}`);
@@ -106,15 +104,14 @@ const JobDetailPage: React.FC = () => {
 
       // 如果没有repo_url，构造一个默认的
       if (!data.repo_url) {
-        const constructedRepoUrl = `https://github.com/${owner}/${repo}`;
-        setRepoUrl(constructedRepoUrl);
-        setShowRepoInput(true);
+        // 构造默认的repo URL，但不需要存储状态
+        console.log('No repo_url found, will use constructed URL:', `https://github.com/${owner}/${repo}`);
       }
     } catch (err) {
       console.error('Error fetching documentation status:', err);
       setError('Failed to fetch documentation status');
     }
-  };
+  }, [requestId, API_BASE_URL, docContent, fetchDocumentationContent, owner, repo]);
 
   // 初始加载和定期刷新
   useEffect(() => {
@@ -130,7 +127,7 @@ const JobDetailPage: React.FC = () => {
     }, 5000);
     
     return () => clearInterval(interval);
-  }, [requestId, status?.status]);
+  }, [requestId, status, fetchStatus]);
 
   // 强制刷新文档生成
   const refreshDocumentation = async () => {
@@ -149,8 +146,6 @@ const JobDetailPage: React.FC = () => {
     
     try {
       setRefreshing(true);
-      setRefreshProgress(0);
-      setRefreshStage('Initializing');
       
       // 调用API强制重新生成文档
       const requestBody = {
@@ -181,17 +176,17 @@ const JobDetailPage: React.FC = () => {
       
       if (data.request_id) {
         // 重置状态显示
-        const resetStatus = {
+        const resetStatus: DocumentationStatus = {
           ...status,
           status: 'pending',
           progress: 0,
           current_stage: 'fetching_repository',
-          error: null,
-          completed_at: null,
+          error: undefined,
+          completed_at: undefined,
           stages: status.stages.map(stage => ({
             ...stage,
             completed: false,
-            execution_time: null
+            execution_time: undefined
           }))
         };
         
@@ -208,8 +203,6 @@ const JobDetailPage: React.FC = () => {
               
               // 更新状态
               setStatus(statusData);
-              setRefreshProgress(statusData.progress);
-              setRefreshStage(statusData.current_stage);
               
               // 如果完成或失败，清除轮询
               if (['completed', 'failed'].includes(statusData.status)) {
@@ -318,58 +311,58 @@ const JobDetailPage: React.FC = () => {
   };
 
   // Markdown components for rendering
-  const components = {
-    h1: ({ children, ...props }: any) => (
+  const components: Components = {
+    h1: ({ children, ...props }) => (
       <h1 className="text-4xl font-bold mb-4 mt-0 text-gray-900 dark:text-white" {...props}>
         {children}
       </h1>
     ),
-    h2: ({ children, ...props }: any) => (
+    h2: ({ children, ...props }) => (
       <h2 className="text-3xl font-semibold mb-3 mt-8 text-gray-900 dark:text-white" {...props}>
         {children}
       </h2>
     ),
-    h3: ({ children, ...props }: any) => (
+    h3: ({ children, ...props }) => (
       <h3 className="text-2xl font-semibold mb-2 mt-6 text-gray-900 dark:text-white" {...props}>
         {children}
       </h3>
     ),
-    h4: ({ children, ...props }: any) => (
+    h4: ({ children, ...props }) => (
       <h4 className="text-xl font-semibold mb-2 mt-4 text-gray-900 dark:text-white" {...props}>
         {children}
       </h4>
     ),
-    h5: ({ children, ...props }: any) => (
+    h5: ({ children, ...props }) => (
       <h5 className="text-lg font-semibold mb-2 mt-4 text-gray-900 dark:text-white" {...props}>
         {children}
       </h5>
     ),
-    h6: ({ children, ...props }: any) => (
+    h6: ({ children, ...props }) => (
       <h6 className="text-base font-semibold mb-2 mt-4 text-gray-900 dark:text-white" {...props}>
         {children}
       </h6>
     ),
-    p: ({ children, ...props }: any) => (
+    p: ({ children, ...props }) => (
       <p className="mb-4 leading-relaxed text-gray-700 dark:text-gray-300" {...props}>
         {children}
       </p>
     ),
-    ul: ({ children, ...props }: any) => (
+    ul: ({ children, ...props }) => (
       <ul className="mb-4 pl-6 list-disc text-gray-700 dark:text-gray-300" {...props}>
         {children}
       </ul>
     ),
-    ol: ({ children, ...props }: any) => (
+    ol: ({ children, ...props }) => (
       <ol className="mb-4 pl-6 list-decimal text-gray-700 dark:text-gray-300" {...props}>
         {children}
       </ol>
     ),
-    li: ({ children, ...props }: any) => (
+    li: ({ children, ...props }) => (
       <li className="mb-1" {...props}>
         {children}
       </li>
     ),
-    a: ({ children, href, ...props }: any) => (
+    a: ({ children, href, ...props }) => (
       <a
         href={href}
         className="text-blue-600 dark:text-blue-400 underline hover:text-blue-800 dark:hover:text-blue-300"
@@ -378,22 +371,29 @@ const JobDetailPage: React.FC = () => {
         {children}
       </a>
     ),
-    strong: ({ children, ...props }: any) => (
+    strong: ({ children, ...props }) => (
       <strong className="font-semibold text-gray-900 dark:text-white" {...props}>
         {children}
       </strong>
     ),
-    em: ({ children, ...props }: any) => (
+    em: ({ children, ...props }) => (
       <em className="italic" {...props}>
         {children}
       </em>
     ),
-    blockquote: ({ children, ...props }: any) => (
+    blockquote: ({ children, ...props }) => (
       <blockquote className="border-l-4 border-gray-300 dark:border-gray-600 pl-4 my-4 italic text-gray-600 dark:text-gray-400" {...props}>
         {children}
       </blockquote>
     ),
-    code({ inline, className, children, ...props }: any) {
+    code(props: {
+      inline?: boolean;
+      className?: string;
+      children?: React.ReactNode;
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      [key: string]: any; // Using any here as it's required for ReactMarkdown components
+    }) {
+      const { inline, className, children, ...otherProps } = props;
       const match = /language-(\w+)/.exec(className || '');
       const codeContent = children ? String(children).replace(/\n$/, '') : '';
 
@@ -418,11 +418,11 @@ const JobDetailPage: React.FC = () => {
               <span>{match[1]}</span>
             </div>
             <SyntaxHighlighter
-              style={vscDarkPlus}
+              style={vscDarkPlus as { [key: string]: React.CSSProperties }}
               language={match[1]}
               PreTag="div"
               className="!mt-0 !rounded-t-none"
-              {...props}
+              {...otherProps}
             >
               {codeContent}
             </SyntaxHighlighter>
@@ -432,7 +432,7 @@ const JobDetailPage: React.FC = () => {
 
       // Inline code
       return (
-        <code className="bg-gray-100 dark:bg-gray-800 px-1 py-0.5 rounded font-mono text-xs" {...props}>
+        <code className="bg-gray-100 dark:bg-gray-800 px-1 py-0.5 rounded font-mono text-xs" {...otherProps}>
           {children}
         </code>
       );

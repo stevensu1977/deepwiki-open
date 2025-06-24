@@ -7,6 +7,7 @@ import { FaHome, FaSun, FaMoon, FaComments } from 'react-icons/fa';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import rehypeRaw from 'rehype-raw';
+import type { Components } from 'react-markdown';
 import { Prism as SyntaxHighlighter } from 'react-syntax-highlighter';
 import { vscDarkPlus } from 'react-syntax-highlighter/dist/esm/styles/prism';
 import Mermaid from '@/components/Mermaid';
@@ -22,6 +23,8 @@ interface TocItem {
   text: string;
   level: number;
 }
+
+
 
 export default function WikiPage() {
   const params = useParams();
@@ -87,7 +90,7 @@ export default function WikiPage() {
     if (owner && repo) {
       fetchDocumentation();
     }
-  }, [owner, repo]);
+  }, [owner, repo, API_BASE_URL]);
 
   const parseToc = (content: string): TocItem[] => {
     const lines = content.split('\n');
@@ -110,7 +113,8 @@ export default function WikiPage() {
       // Parse TOC items - [title](link)
       const match = line.match(/- \[(.*?)\]\((.*?)\)/);
       if (match) {
-        const [_, text, link] = match;
+        const [neverUseThis, text, link] = match;
+        console.log(neverUseThis);
         const id = link.split('/').pop()?.replace('.md', '') || '';
         
         tocItems.push({
@@ -155,58 +159,58 @@ export default function WikiPage() {
   };
 
   // Markdown components for rendering
-  const components = {
-    h1: ({ children, ...props }: any) => (
+  const components: Components = {
+    h1: ({ children, ...props }) => (
       <h1 className="text-4xl font-bold mb-4 mt-0 text-gray-900 dark:text-white" {...props}>
         {children}
       </h1>
     ),
-    h2: ({ children, ...props }: any) => (
+    h2: ({ children, ...props }) => (
       <h2 className="text-3xl font-semibold mb-3 mt-8 text-gray-900 dark:text-white" {...props}>
         {children}
       </h2>
     ),
-    h3: ({ children, ...props }: any) => (
+    h3: ({ children, ...props }) => (
       <h3 className="text-2xl font-semibold mb-2 mt-6 text-gray-900 dark:text-white" {...props}>
         {children}
       </h3>
     ),
-    h4: ({ children, ...props }: any) => (
+    h4: ({ children, ...props }) => (
       <h4 className="text-xl font-semibold mb-2 mt-4 text-gray-900 dark:text-white" {...props}>
         {children}
       </h4>
     ),
-    h5: ({ children, ...props }: any) => (
+    h5: ({ children, ...props }) => (
       <h5 className="text-lg font-semibold mb-2 mt-4 text-gray-900 dark:text-white" {...props}>
         {children}
       </h5>
     ),
-    h6: ({ children, ...props }: any) => (
+    h6: ({ children, ...props }) => (
       <h6 className="text-base font-semibold mb-2 mt-4 text-gray-900 dark:text-white" {...props}>
         {children}
       </h6>
     ),
-    p: ({ children, ...props }: any) => (
+    p: ({ children, ...props }) => (
       <p className="mb-4 leading-relaxed text-gray-700 dark:text-gray-300" {...props}>
         {children}
       </p>
     ),
-    ul: ({ children, ...props }: any) => (
+    ul: ({ children, ...props }) => (
       <ul className="mb-4 pl-6 list-disc text-gray-700 dark:text-gray-300" {...props}>
         {children}
       </ul>
     ),
-    ol: ({ children, ...props }: any) => (
+    ol: ({ children, ...props }) => (
       <ol className="mb-4 pl-6 list-decimal text-gray-700 dark:text-gray-300" {...props}>
         {children}
       </ol>
     ),
-    li: ({ children, ...props }: any) => (
+    li: ({ children, ...props }) => (
       <li className="mb-1" {...props}>
         {children}
       </li>
     ),
-    a: ({ children, href, ...props }: any) => (
+    a: ({ children, href, ...props }) => (
       <a
         href={href}
         className="text-blue-600 dark:text-blue-400 underline hover:text-blue-800 dark:hover:text-blue-300"
@@ -215,22 +219,29 @@ export default function WikiPage() {
         {children}
       </a>
     ),
-    strong: ({ children, ...props }: any) => (
+    strong: ({ children, ...props }) => (
       <strong className="font-semibold text-gray-900 dark:text-white" {...props}>
         {children}
       </strong>
     ),
-    em: ({ children, ...props }: any) => (
+    em: ({ children, ...props }) => (
       <em className="italic" {...props}>
         {children}
       </em>
     ),
-    blockquote: ({ children, ...props }: any) => (
+    blockquote: ({ children, ...props }) => (
       <blockquote className="border-l-4 border-gray-300 dark:border-gray-600 pl-4 my-4 italic text-gray-600 dark:text-gray-400" {...props}>
         {children}
       </blockquote>
     ),
-    code({ inline, className, children, ...props }: any) {
+    code(props: {
+      inline?: boolean;
+      className?: string;
+      children?: React.ReactNode;
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      [key: string]: any; // Using any here as it's required for ReactMarkdown components
+    }) {
+      const { inline, className, children, ...otherProps } = props;
       const match = /language-(\w+)/.exec(className || '');
       const codeContent = children ? String(children).replace(/\n$/, '') : '';
 
@@ -255,11 +266,11 @@ export default function WikiPage() {
               <span>{match[1]}</span>
             </div>
             <SyntaxHighlighter
-              style={vscDarkPlus}
+              style={vscDarkPlus as { [key: string]: React.CSSProperties }}
               language={match[1]}
               PreTag="div"
               className="!mt-0 !rounded-t-none"
-              {...props}
+              {...otherProps}
             >
               {codeContent}
             </SyntaxHighlighter>
@@ -269,7 +280,7 @@ export default function WikiPage() {
 
       // Inline code
       return (
-        <code className="bg-gray-100 dark:bg-gray-800 px-1 py-0.5 rounded font-mono text-xs" {...props}>
+        <code className="bg-gray-100 dark:bg-gray-800 px-1 py-0.5 rounded font-mono text-xs" {...otherProps}>
           {children}
         </code>
       );

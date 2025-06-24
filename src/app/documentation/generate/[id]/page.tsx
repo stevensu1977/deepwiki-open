@@ -36,7 +36,7 @@ export default function LegacyJobRedirect() {
     if (id) {
       redirectToNewFormat();
     }
-  }, [id, router]);
+  }, [id, router, API_BASE_URL]);
 
   return (
     <div className="min-h-screen bg-gray-50 dark:bg-gray-900 flex items-center justify-center">
